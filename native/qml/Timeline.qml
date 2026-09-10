@@ -211,6 +211,17 @@ Item {
               }
             }
             Rectangle {
+              anchors.left: parent.left; width: 7; height: parent.height; radius: 3; color: "#ffffff40"; z: 2
+              MouseArea {
+                anchors.fill: parent; cursorShape: Qt.SizeHorCursor
+                onPressed: tl.blockClicked(index)
+                onPositionChanged: if (pressed) {
+                  var t = tl.x2t(mapToItem(blockRow, mouse.x, 0).x)
+                  tl.blockEdited(index, { start: Math.max(0, Math.min(t, modelData.end - 0.2)) })
+                }
+              }
+            }
+            Rectangle {
               anchors.right: parent.right; width: 7; height: parent.height; radius: 3; color: "#ffffff40"; z: 2
               MouseArea {
                 anchors.fill: parent; cursorShape: Qt.SizeHorCursor
@@ -253,6 +264,20 @@ Item {
           Rectangle { anchors.fill: parent; color: T.accent; opacity: 0.08 }
           Rectangle { anchors.top: parent.top; width: parent.width; height: 2; color: T.accent }
           Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2; color: T.accent }
+          // right-drag anywhere inside the range MOVES the whole trim selection
+          MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.RightButton
+            cursorShape: Qt.DragMoveCursor
+            property real grabDt: 0
+            onPressed: grabDt = tl.x2t(mapToItem(strip, mouse.x, 0).x) - tl.trimIn
+            onPositionChanged: if (pressed) {
+              var len = tl.trimOut - tl.trimIn
+              var t = tl.x2t(mapToItem(strip, mouse.x, 0).x) - grabDt
+              t = Math.max(0, Math.min(tl.duration - len, t))
+              tl.trimEdited(t, t + len)
+            }
+          }
         }
         Rectangle {  // in handle
           x: tl.t2x(tl.trimIn) - 5; width: 10; height: parent.height
@@ -260,7 +285,20 @@ Item {
           Label { anchors.centerIn: parent; text: "▮"; color: "#16161e"; font.pixelSize: 8 }
           MouseArea {
             anchors.fill: parent; cursorShape: Qt.SizeHorCursor
-            onPositionChanged: if (pressed) tl.trimEdited(Math.min(tl.x2t(mapToItem(strip, mouse.x, 0).x), tl.trimOut - 0.1), tl.trimOut)
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            property real grabDt: 0
+            onPressed: grabDt = tl.x2t(mapToItem(strip, mouse.x, 0).x) - tl.trimIn
+            onPositionChanged: if (pressed) {
+              if (mouse.buttons & Qt.RightButton) {
+                // right-drag: move the whole selection, keep its length
+                var lenR = tl.trimOut - tl.trimIn
+                var tR = tl.x2t(mapToItem(strip, mouse.x, 0).x) - grabDt
+                tR = Math.max(0, Math.min(tl.duration - lenR, tR))
+                tl.trimEdited(tR, tR + lenR)
+              } else {
+                tl.trimEdited(Math.min(tl.x2t(mapToItem(strip, mouse.x, 0).x), tl.trimOut - 0.1), tl.trimOut)
+              }
+            }
           }
         }
         Rectangle {  // out handle
@@ -269,7 +307,19 @@ Item {
           Label { anchors.centerIn: parent; text: "▮"; color: "#16161e"; font.pixelSize: 8 }
           MouseArea {
             anchors.fill: parent; cursorShape: Qt.SizeHorCursor
-            onPositionChanged: if (pressed) tl.trimEdited(tl.trimIn, Math.max(tl.x2t(mapToItem(strip, mouse.x, 0).x), tl.trimIn + 0.1))
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            property real grabDt: 0
+            onPressed: grabDt = tl.x2t(mapToItem(strip, mouse.x, 0).x) - tl.trimOut
+            onPositionChanged: if (pressed) {
+              if (mouse.buttons & Qt.RightButton) {
+                var lenR = tl.trimOut - tl.trimIn
+                var tR = tl.x2t(mapToItem(strip, mouse.x, 0).x) - grabDt
+                tR = Math.max(0, Math.min(tl.duration - lenR, tR))
+                tl.trimEdited(tR, tR + lenR)
+              } else {
+                tl.trimEdited(tl.trimIn, Math.max(tl.x2t(mapToItem(strip, mouse.x, 0).x), tl.trimIn + 0.1))
+              }
+            }
           }
         }
         MouseArea {
@@ -316,6 +366,17 @@ Item {
                 var len = modelData.outS - modelData.inS
                 t = Math.max(0, Math.min(tl.duration - len, t))
                 tl.layerEdited(index, t, t + len)
+              }
+            }
+            Rectangle {
+              anchors.left: parent.left; width: 7; height: parent.height; radius: 3; color: "#ffffff30"
+              MouseArea {
+                anchors.fill: parent; cursorShape: Qt.SizeHorCursor
+                onPressed: tl.layerClicked(index)
+                onPositionChanged: if (pressed) {
+                  var t = tl.x2t(mapToItem(track, mouse.x, 0).x)
+                  tl.layerEdited(index, Math.max(0, Math.min(t, modelData.outS - 0.2)), modelData.outS)
+                }
               }
             }
             Rectangle {
