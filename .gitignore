@@ -1,0 +1,11 @@
+# Build artifacts
+native/omareel-native
+native/*.o
+native/Makefile
+native/.qmake.stash
+native/qml_qrc.cpp
+native/qrc_qml.cpp
+
+# Local data / test outputs
+*.log
+.DS_Store
