@@ -11,10 +11,15 @@ Item {
   property real trimOut: 1
   property var stripUrls: []
   property var layers: []
+  property int layersRev: 0
   property var blocks: []
+  property int blocksRev: 0
   property int selectedBlock: -1
   property int selectedLayer: -1
   property real zoom: 0          // px/sec; 0 = fit whole duration
+  property bool snappingEnabled: true
+  property string snappingLabel: "Magnetic snapping"
+  property string snappingTip: "Snap clip edges to the playhead and other boundaries. Hold Alt to bypass."
 
   signal seek(real t)
   signal trimEdited(real a, real b)
@@ -34,6 +39,32 @@ Item {
   function pps() { return zoom > 0 ? zoom : fitPps() }
   function t2x(t) { return t * pps() }
   function x2t(x) { return Math.max(0, Math.min(duration, x / pps())) }
+  // Snap the nearest valid edge in screen pixels, independent of zoom.
+  function snapTime(value, offsets, kind, index, minimum, maximum, modifiers) {
+    value = Math.max(minimum, Math.min(maximum, value))
+    if (!snappingEnabled || (modifiers & Qt.AltModifier)) return value
+    var targets = [position, 0, duration]
+    if (kind !== "trim") targets.push(trimIn, trimOut)
+    for (var l = 0; l < layers.length; l++) {
+      if (kind !== "layer" || l !== index) targets.push(layers[l].inS, layers[l].outS)
+    }
+    for (var b = 0; b < blocks.length; b++) {
+      if (kind !== "block" || b !== index) targets.push(blocks[b].start, blocks[b].end)
+    }
+    var best = value, distance = 8 / pps()
+    for (var i = 0; i < targets.length; i++) {
+      for (var j = 0; j < offsets.length; j++) {
+        var candidate = targets[i] - offsets[j]
+        var delta = Math.abs(candidate - value)
+        if (candidate >= minimum && candidate <= maximum && delta <= distance) {
+          best = candidate
+          distance = delta
+        }
+      }
+    }
+    return best
+  }
+
   function zoomBy(factor, anchorT) {
     var cur = pps()
     var next = Math.max(fitPps(), Math.min(400, cur * factor))
@@ -73,14 +104,38 @@ Item {
     }
     Rectangle {  // V1
       x: 0; y: tl.rulerH + tl.blockH; width: parent.width; height: tl.stripH; color: T.panelAlt
-      Label { anchors.centerIn: parent; text: "V1"; color: T.textMuted; font.bold: true; font.pixelSize: 11 }
+      Label { anchors.horizontalCenter: parent.horizontalCenter; y: 5; text: "V1"; color: T.textMuted; font.bold: true; font.pixelSize: 11 }
+      ToolButton {
+        id: snapButton
+        objectName: "snappingToggle"
+        anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
+        width: 44; height: 27
+        text: "Snap"; font.pixelSize: 10
+        checkable: true; checked: tl.snappingEnabled
+        focusPolicy: Qt.StrongFocus
+        Accessible.name: tl.snappingLabel
+        Accessible.description: tl.snappingTip
+        ToolTip.visible: hovered
+        ToolTip.text: tl.snappingTip
+        contentItem: Text {
+          text: snapButton.text; font: snapButton.font
+          horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+          color: snapButton.checked ? T.accent : T.textMuted
+        }
+        background: Rectangle {
+          radius: 3
+          color: snapButton.checked ? T.accentSoft : T.panelDeep
+          border.color: snapButton.activeFocus || snapButton.checked ? T.accent : T.border
+        }
+        onToggled: tl.snappingEnabled = checked
+      }
       Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: T.border }
     }
     Item {
       x: 0; y: tl.rulerH + tl.blockH + tl.stripH; width: parent.width
       height: tl.layers.length * tl.layerH
       Repeater {
-        model: tl.layers
+        model: tl.layers.length
         delegate: Rectangle {
           required property int index
           x: 0; y: index * tl.layerH
@@ -181,55 +236,55 @@ Item {
           text: "✂B = split block at playhead"; color: T.textDim; font.pixelSize: 9
         }
         Repeater {
-          model: tl.blocks
+          model: tl.blocks.length
           delegate: Item {
             id: bb
             required property int index
-            required property var modelData
-            function lc() { return modelData.layout === "apilar" ? T.orange : (modelData.layout === "pip" ? T.cyan : (modelData.layout === "circulo" ? T.magenta : T.accent)) }
-            x: tl.t2x(modelData.start); width: Math.max(14, tl.t2x(modelData.end - modelData.start)); height: tl.blockH
+            readonly property var clipData: { tl.blocksRev; return Object.assign({}, tl.blocks[index]) }
+            function lc() { return clipData.layout === "apilar" ? T.orange : (clipData.layout === "pip" ? T.cyan : (clipData.layout === "circulo" ? T.magenta : T.accent)) }
+            x: tl.t2x(clipData.start); width: Math.max(14, tl.t2x(clipData.end - clipData.start)); height: tl.blockH
             Rectangle {
               anchors.fill: parent; anchors.margins: 1; radius: 4
               color: bb.lc(); opacity: tl.selectedBlock === index ? 0.85 : 0.45
               border.color: tl.selectedBlock === index ? "#fff" : bb.lc(); border.width: tl.selectedBlock === index ? 2 : 1
               Label {
                 anchors.centerIn: parent
-                text: (index + 1) + " " + modelData.layout
+                text: (index + 1) + " " + bb.clipData.layout
                 color: "#16161e"; font.pixelSize: 9; font.bold: true
                 elide: Text.ElideRight; width: parent.width - 6; horizontalAlignment: Text.AlignHCenter
               }
             }
             MouseArea {
-              anchors.fill: parent
+              anchors.fill: parent; preventStealing: true
               property real grabT: 0
-              onPressed: { tl.blockClicked(index); grabT = tl.x2t(mapToItem(blockRow, mouse.x, 0).x) - modelData.start }
-              onPositionChanged: if (pressed) {
+              onPressed: function(mouse) { tl.blockClicked(index); grabT = tl.x2t(mapToItem(blockRow, mouse.x, 0).x) - bb.clipData.start }
+              onPositionChanged: function(mouse) { if (pressed) {
                 var t = tl.x2t(mapToItem(blockRow, mouse.x, 0).x) - grabT
-                var len = modelData.end - modelData.start
-                t = Math.max(0, Math.min(tl.duration - len, t))
+                var len = bb.clipData.end - bb.clipData.start
+                t = tl.snapTime(t, [0, len], "block", index, 0, tl.duration - len, mouse.modifiers)
                 tl.blockEdited(index, { start: t, end: t + len })
-              }
+              } }
             }
             Rectangle {
               anchors.left: parent.left; width: 7; height: parent.height; radius: 3; color: "#ffffff40"; z: 2
               MouseArea {
-                anchors.fill: parent; cursorShape: Qt.SizeHorCursor
+                anchors.fill: parent; cursorShape: Qt.SizeHorCursor; preventStealing: true
                 onPressed: tl.blockClicked(index)
-                onPositionChanged: if (pressed) {
+                onPositionChanged: function(mouse) { if (pressed) {
                   var t = tl.x2t(mapToItem(blockRow, mouse.x, 0).x)
-                  tl.blockEdited(index, { start: Math.max(0, Math.min(t, modelData.end - 0.2)) })
-                }
+                  tl.blockEdited(index, { start: tl.snapTime(t, [0], "block", index, 0, bb.clipData.end - 0.2, mouse.modifiers) })
+                } }
               }
             }
             Rectangle {
               anchors.right: parent.right; width: 7; height: parent.height; radius: 3; color: "#ffffff40"; z: 2
               MouseArea {
-                anchors.fill: parent; cursorShape: Qt.SizeHorCursor
+                anchors.fill: parent; cursorShape: Qt.SizeHorCursor; preventStealing: true
                 onPressed: tl.blockClicked(index)
-                onPositionChanged: if (pressed) {
+                onPositionChanged: function(mouse) { if (pressed) {
                   var t = tl.x2t(mapToItem(blockRow, mouse.x, 0).x)
-                  tl.blockEdited(index, { end: Math.max(modelData.start + 0.2, Math.min(tl.duration, t)) })
-                }
+                  tl.blockEdited(index, { end: tl.snapTime(t, [0], "block", index, bb.clipData.start + 0.2, tl.duration, mouse.modifiers) })
+                } }
               }
             }
           }
@@ -266,17 +321,17 @@ Item {
           Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2; color: T.accent }
           // right-drag anywhere inside the range MOVES the whole trim selection
           MouseArea {
-            anchors.fill: parent
+            anchors.fill: parent; preventStealing: true
             acceptedButtons: Qt.RightButton
             cursorShape: Qt.DragMoveCursor
             property real grabDt: 0
-            onPressed: grabDt = tl.x2t(mapToItem(strip, mouse.x, 0).x) - tl.trimIn
-            onPositionChanged: if (pressed) {
+            onPressed: function(mouse) { grabDt = tl.x2t(mapToItem(strip, mouse.x, 0).x) - tl.trimIn }
+            onPositionChanged: function(mouse) { if (pressed) {
               var len = tl.trimOut - tl.trimIn
               var t = tl.x2t(mapToItem(strip, mouse.x, 0).x) - grabDt
-              t = Math.max(0, Math.min(tl.duration - len, t))
+              t = tl.snapTime(t, [0, len], "trim", -1, 0, tl.duration - len, mouse.modifiers)
               tl.trimEdited(t, t + len)
-            }
+            } }
           }
         }
         Rectangle {  // in handle
@@ -284,21 +339,21 @@ Item {
           color: T.accent; radius: 2
           Label { anchors.centerIn: parent; text: "▮"; color: "#16161e"; font.pixelSize: 8 }
           MouseArea {
-            anchors.fill: parent; cursorShape: Qt.SizeHorCursor
+            anchors.fill: parent; cursorShape: Qt.SizeHorCursor; preventStealing: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             property real grabDt: 0
-            onPressed: grabDt = tl.x2t(mapToItem(strip, mouse.x, 0).x) - tl.trimIn
-            onPositionChanged: if (pressed) {
+            onPressed: function(mouse) { grabDt = tl.x2t(mapToItem(strip, mouse.x, 0).x) - tl.trimIn }
+            onPositionChanged: function(mouse) { if (pressed) {
               if (mouse.buttons & Qt.RightButton) {
                 // right-drag: move the whole selection, keep its length
                 var lenR = tl.trimOut - tl.trimIn
                 var tR = tl.x2t(mapToItem(strip, mouse.x, 0).x) - grabDt
-                tR = Math.max(0, Math.min(tl.duration - lenR, tR))
+                tR = tl.snapTime(tR, [0, lenR], "trim", -1, 0, tl.duration - lenR, mouse.modifiers)
                 tl.trimEdited(tR, tR + lenR)
               } else {
-                tl.trimEdited(Math.min(tl.x2t(mapToItem(strip, mouse.x, 0).x), tl.trimOut - 0.1), tl.trimOut)
+                tl.trimEdited(tl.snapTime(tl.x2t(mapToItem(strip, mouse.x, 0).x), [0], "trim", -1, 0, tl.trimOut - 0.1, mouse.modifiers), tl.trimOut)
               }
-            }
+            } }
           }
         }
         Rectangle {  // out handle
@@ -306,20 +361,20 @@ Item {
           color: T.accent; radius: 2
           Label { anchors.centerIn: parent; text: "▮"; color: "#16161e"; font.pixelSize: 8 }
           MouseArea {
-            anchors.fill: parent; cursorShape: Qt.SizeHorCursor
+            anchors.fill: parent; cursorShape: Qt.SizeHorCursor; preventStealing: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             property real grabDt: 0
-            onPressed: grabDt = tl.x2t(mapToItem(strip, mouse.x, 0).x) - tl.trimOut
-            onPositionChanged: if (pressed) {
+            onPressed: function(mouse) { grabDt = tl.x2t(mapToItem(strip, mouse.x, 0).x) - tl.trimIn }
+            onPositionChanged: function(mouse) { if (pressed) {
               if (mouse.buttons & Qt.RightButton) {
                 var lenR = tl.trimOut - tl.trimIn
                 var tR = tl.x2t(mapToItem(strip, mouse.x, 0).x) - grabDt
-                tR = Math.max(0, Math.min(tl.duration - lenR, tR))
+                tR = tl.snapTime(tR, [0, lenR], "trim", -1, 0, tl.duration - lenR, mouse.modifiers)
                 tl.trimEdited(tR, tR + lenR)
               } else {
-                tl.trimEdited(tl.trimIn, Math.max(tl.x2t(mapToItem(strip, mouse.x, 0).x), tl.trimIn + 0.1))
+                tl.trimEdited(tl.trimIn, tl.snapTime(tl.x2t(mapToItem(strip, mouse.x, 0).x), [0], "trim", -1, tl.trimIn + 0.1, tl.duration, mouse.modifiers))
               }
-            }
+            } }
           }
         }
         MouseArea {
@@ -331,18 +386,18 @@ Item {
 
       // text layer tracks
       Repeater {
-        model: tl.layers
+        model: tl.layers.length
         delegate: Item {
           id: track
           required property int index
-          required property var modelData
+          readonly property var clipData: { tl.layersRev; return Object.assign({}, tl.layers[index]) }
           x: 0; y: tl.rulerH + tl.blockH + tl.stripH + index * tl.layerH
           width: tracks.width; height: tl.layerH
           Rectangle { anchors.fill: parent; color: index % 2 ? T.panelDeep : T.panelAlt; opacity: 0.6 }
           Rectangle {
             id: block
-            x: tl.t2x(modelData.inS) + 1
-            width: Math.max(16, tl.t2x(modelData.outS - modelData.inS) - 2)
+            x: tl.t2x(track.clipData.inS) + 1
+            width: Math.max(16, tl.t2x(track.clipData.outS - track.clipData.inS) - 2)
             height: 22; anchors.verticalCenter: parent.verticalCenter
             radius: 4
             gradient: Gradient {
@@ -354,40 +409,41 @@ Item {
             Label {
               anchors.left: parent.left; anchors.leftMargin: 7; anchors.verticalCenter: parent.verticalCenter
               width: parent.width - 14
-              text: modelData.text || "—"; elide: Text.ElideRight
+              text: track.clipData.text || "—"
+              elide: Text.ElideRight
               color: T.text; font.pixelSize: 10
             }
             MouseArea {
-              anchors.fill: parent
+              anchors.fill: parent; preventStealing: true
               property real grabT: 0
-              onPressed: { tl.layerClicked(index); grabT = tl.x2t(mapToItem(track, mouse.x, 0).x) - modelData.inS }
-              onPositionChanged: if (pressed) {
+              onPressed: function(mouse) { tl.layerClicked(index); grabT = tl.x2t(mapToItem(track, mouse.x, 0).x) - track.clipData.inS }
+              onPositionChanged: function(mouse) { if (pressed) {
                 var t = tl.x2t(mapToItem(track, mouse.x, 0).x) - grabT
-                var len = modelData.outS - modelData.inS
-                t = Math.max(0, Math.min(tl.duration - len, t))
+                var len = track.clipData.outS - track.clipData.inS
+                t = tl.snapTime(t, [0, len], "layer", index, 0, tl.duration - len, mouse.modifiers)
                 tl.layerEdited(index, t, t + len)
-              }
+              } }
             }
             Rectangle {
               anchors.left: parent.left; width: 7; height: parent.height; radius: 3; color: "#ffffff30"
               MouseArea {
-                anchors.fill: parent; cursorShape: Qt.SizeHorCursor
+                anchors.fill: parent; cursorShape: Qt.SizeHorCursor; preventStealing: true
                 onPressed: tl.layerClicked(index)
-                onPositionChanged: if (pressed) {
+                onPositionChanged: function(mouse) { if (pressed) {
                   var t = tl.x2t(mapToItem(track, mouse.x, 0).x)
-                  tl.layerEdited(index, Math.max(0, Math.min(t, modelData.outS - 0.2)), modelData.outS)
-                }
+                  tl.layerEdited(index, tl.snapTime(t, [0], "layer", index, 0, track.clipData.outS - 0.2, mouse.modifiers), track.clipData.outS)
+                } }
               }
             }
             Rectangle {
               anchors.right: parent.right; width: 7; height: parent.height; radius: 3; color: "#ffffff30"
               MouseArea {
-                anchors.fill: parent; cursorShape: Qt.SizeHorCursor
+                anchors.fill: parent; cursorShape: Qt.SizeHorCursor; preventStealing: true
                 onPressed: tl.layerClicked(index)
-                onPositionChanged: if (pressed) {
+                onPositionChanged: function(mouse) { if (pressed) {
                   var t = tl.x2t(mapToItem(track, mouse.x, 0).x)
-                  tl.layerEdited(index, modelData.inS, Math.max(modelData.inS + 0.2, Math.min(tl.duration, t)))
-                }
+                  tl.layerEdited(index, track.clipData.inS, tl.snapTime(t, [0], "layer", index, track.clipData.inS + 0.2, tl.duration, mouse.modifiers))
+                } }
               }
             }
           }

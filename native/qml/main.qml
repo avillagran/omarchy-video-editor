@@ -114,14 +114,15 @@ ApplicationWindow {
   property var apilarBottom: ({ x: 0, y: 50, w: 100, h: 50 })
   // blocks: per-range layouts on the cut timeline; empty = single implicit block (global template)
   property var blocks: []
+  property int blocksRev: 0
   property int selectedBlock: -1
   property var fgRegion: ({ x: 25, y: 25, w: 50, h: 50 })
   property real pipFx: 0.5
   property real pipFy: 0.72
 
   function layoutName() { return tplIndex === 1 ? "apilar" : (tplIndex === 2 ? "pip" : (tplIndex === 3 ? "circulo" : "completa")) }
-  function activeLayout() { return selectedBlock >= 0 && blocks[selectedBlock] ? blocks[selectedBlock].layout : layoutName() }
-  function activeBlock() { return selectedBlock >= 0 && blocks[selectedBlock] ? blocks[selectedBlock] : null }
+  function activeLayout() { blocksRev; return selectedBlock >= 0 && blocks[selectedBlock] ? blocks[selectedBlock].layout : layoutName() }
+  function activeBlock() { blocksRev; return selectedBlock >= 0 && blocks[selectedBlock] ? blocks[selectedBlock] : null }
   function cpBox(t) { return t ? ({ x: t.x, y: t.y, w: t.w, h: t.h }) : ({ x: 0, y: 0, w: 100, h: 100 }) }
   // fresh copies on purpose: returning live refs means the RegionEditor/Output
   // bindings see "same value" on in-place edits and never refresh (split slider,
@@ -642,7 +643,7 @@ ApplicationWindow {
         x: videoOut.contentRect.x; y: videoOut.contentRect.y
         width: videoOut.contentRect.width; height: videoOut.contentRect.height
         visible: videoOut.contentRect.width > 4 && videoOut.contentRect.height > 4
-        layers: win.layers
+        layers: { win.layersRev; return win.layers.slice() }
         space: "prog"
         rev: win.layersRev
         refH: win.srcH
@@ -737,6 +738,8 @@ ApplicationWindow {
       model: win.layers; spacing: 6; clip: true
       delegate: Rectangle {
         id: card
+        objectName: "layerCard"
+        property bool expanded: false
         required property int index
         required property var modelData
         property var cardLayer: modelData
@@ -751,18 +754,18 @@ ApplicationWindow {
               text: "≡"; color: T.textDim; font.pixelSize: 13
               MouseArea {
                 anchors.fill: parent; cursorShape: Qt.SizeVerCursor
-                property real startY: 0
-                onPressed: startY = mapToItem(null, mouse.x, mouse.y).y
-                onReleased: {
-                  var dy = mapToItem(null, mouse.x, mouse.y).y - startY
-                  var step = 90
-                  var target = Math.max(0, Math.min(win.layers.length - 1, index + Math.round(dy / step)))
+                preventStealing: true
+                onReleased: function(mouse) {
+                  var y = mapToItem(layerList, mouse.x, mouse.y).y + layerList.contentY
+                  var target = layerList.indexAt(1, y)
+                  if (target < 0) target = layerList.indexAt(1, y + layerList.spacing)
+                  if (target < 0) target = y < 0 ? 0 : win.layers.length - 1
                   if (target !== index) {
                     var l = win.layers.slice()
                     var item = l.splice(index, 1)[0]
                     l.splice(target, 0, item)
-                    win.layers = l
                     win.selectedLayer = target
+                    win.layers = l
                   }
                 }
               }
@@ -771,22 +774,32 @@ ApplicationWindow {
               text: modelData.type === "text" ? "🅣" : (modelData.type === "gif" ? "GIF" : (modelData.type === "video" ? "🎬" : "🖼"))
               color: modelData.type === "video" ? T.orange : T.magenta; font.pixelSize: 10; font.bold: true
             }
-            FnField {
-              visible: modelData.type === "text"
-              Layout.fillWidth: true; placeholderText: win.tt("textPlaceholder"); text: modelData.text
-              // in-place update: reassigning win.layers rebuilds this Repeater and
-              // steals focus on every keystroke
-              onTextChanged: { win.layers[index].text = text; win.touchLayers() }
-              onActiveFocusChanged: win.selectedLayer = index
-            }
             Label {
-              visible: modelData.type !== "text"
               Layout.fillWidth: true; elide: Label.ElideMiddle; font.pixelSize: 10; color: T.text
-              text: modelData.path ? modelData.path.split("/").pop() : "…"
+              text: {
+                win.layersRev
+                var l = win.layers[index]
+                return l ? (l.type === "text" ? (l.text || win.tt("textPlaceholder")) : (l.path ? l.path.split("/").pop() : "…")) : ""
+              }
+              MouseArea { anchors.fill: parent; onClicked: { win.selectedLayer = index; card.expanded = !card.expanded } }
             }
-            IconBtn { glyph: "✕"; onClicked: { var l = win.layers.slice(); l.splice(index, 1); win.layers = l; win.selectedLayer = -1 } }
+            IconBtn {
+              objectName: "layerExpandToggle"
+              width: 24; height: 24
+              glyph: card.expanded ? "▾" : "▸"
+              tip: win.tt(card.expanded ? "collapseLayer" : "expandLayer")
+              onClicked: { win.selectedLayer = index; card.expanded = !card.expanded }
+            }
+            IconBtn { width: 24; height: 24; glyph: "✕"; onClicked: { var l = win.layers.slice(); l.splice(index, 1); win.layers = l; win.selectedLayer = -1 } }
           }
-          RowLayout { Layout.fillWidth: true
+          FnField {
+            visible: card.expanded && modelData.type === "text"
+            Layout.fillWidth: true; placeholderText: win.tt("textPlaceholder"); text: modelData.text
+            // Keep the editor alive during in-place edits.
+            onTextChanged: { win.layers[index].text = text; win.touchLayers() }
+            onActiveFocusChanged: if (activeFocus) win.selectedLayer = index
+          }
+          RowLayout { visible: card.expanded; Layout.fillWidth: true
             Label { text: modelData.type === "text" ? win.tt("fontSize") : "w%"; color: T.textDim; font.pixelSize: 10 }
             FnSpin {
               from: modelData.type === "text" ? 20 : 5; to: modelData.type === "text" ? 300 : 100
@@ -797,7 +810,7 @@ ApplicationWindow {
             FnSpin { from: 5; to: 95; value: Math.round(modelData.y * 100); onValueChanged: { win.layers[index].y = value / 100; win.touchLayers() } }
           }
           RowLayout {
-            visible: card.cardLayer.type === "video"; Layout.fillWidth: true; spacing: 4
+            visible: card.expanded && card.cardLayer.type === "video"; Layout.fillWidth: true; spacing: 4
             Label { text: "forma"; color: T.textDim; font.pixelSize: 10 }
             Repeater {
               model: [["rect", "▢"], ["rounded", "⬒"], ["circle", "◯"]]
@@ -813,7 +826,7 @@ ApplicationWindow {
             }
             Item { Layout.fillWidth: true }
           }
-          Label { text: "⏱ " + win.fmtTc(modelData.inS) + " → " + win.fmtTc(modelData.outS); color: T.textMuted; font.pixelSize: 9; font.family: T.fontMono }
+          Label { visible: card.expanded; text: "⏱ " + win.fmtTc(modelData.inS) + " → " + win.fmtTc(modelData.outS); color: T.textMuted; font.pixelSize: 9; font.family: T.fontMono }
         }
         // click anywhere on the card focuses the layer (kept below child controls)
         MouseArea {
@@ -899,7 +912,11 @@ ApplicationWindow {
         Label { anchors.centerIn: parent; text: "Vertical 9:16 · 1080×1920"; color: T.text; font.pixelSize: 11 }
       }
       Label { text: win.tt("template").toUpperCase(); color: T.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1 }
-      Label { visible: win.selectedBlock >= 0; text: "BLOQUE " + (win.selectedBlock + 1) + " · " + win.fmtDur(win.blocks[win.selectedBlock] ? win.blocks[win.selectedBlock].end - win.blocks[win.selectedBlock].start : 0); color: T.orange; font.pixelSize: 9; font.bold: true }
+      Label {
+        visible: win.selectedBlock >= 0
+        text: { var b = win.activeBlock(); return "BLOQUE " + (win.selectedBlock + 1) + " · " + win.fmtDur(b ? b.end - b.start : 0) }
+        color: T.orange; font.pixelSize: 9; font.bold: true
+      }
       FnCombo { Layout.fillWidth: true; model: [win.tt("tplCompleta"), win.tt("tplApilar"), "PiP", "Círculo"]
         currentIndex: { var l = win.activeLayout(); return l === "apilar" ? 1 : (l === "pip" ? 2 : (l === "circulo" ? 3 : 0)) }
         onActivated: win.setBlockLayout(["completa", "apilar", "pip", "circulo"][currentIndex]) }
@@ -957,7 +974,7 @@ ApplicationWindow {
       pipFx: { var b = win.activeBlock(); return b ? (b.fx || 0.5) : win.pipFx }
       pipFy: { var b = win.activeBlock(); return b ? (b.fy || 0.72) : win.pipFy }
       splitFrac: win.activeSplit()
-      layers: win.layers
+      layers: { win.layersRev; return win.layers.slice() }
       layersRev: win.layersRev
       srcW: win.srcW; srcH: win.srcH
       onSplitEdited: function (f) { win.setSplit(f) }
@@ -1210,6 +1227,8 @@ ApplicationWindow {
     // timeline (pinned to bottom)
     Timeline {
       id: timeline
+      snappingLabel: win.tt("snapping")
+      snappingTip: win.tt("snappingTip")
       visible: win.view === "edit"
       Layout.fillWidth: true
       Layout.preferredHeight: win.tlHeight > 0 ? win.tlHeight : 216 + win.layers.length * 29
@@ -1217,20 +1236,22 @@ ApplicationWindow {
       position: playerRef ? playerRef.position / 1000 : 0
       trimIn: win.trimIn; trimOut: win.trimOut
       stripUrls: win.stripUrls
-      layers: win.layers
+      layers: { win.layersRev; return win.layers.slice() }
+      layersRev: win.layersRev
       selectedLayer: win.selectedLayer
-      blocks: win.blocks
+      blocks: { win.blocksRev; return win.blocks.slice() }
+      blocksRev: win.blocksRev
       selectedBlock: win.selectedBlock
       onSeek: function (t) { if (playerRef) playerRef.position = Math.round(t * 1000); if (win.blocks.length) win.selectBlockAt(t) }
       onBlockClicked: function (i) { win.selectedBlock = i }
       onBlockEdited: function (i, patch) {
-        var cp = win.blocks.slice(); var b = cp[i]; if (!b) return
+        var cp = win.blocks; var b = cp[i]; if (!b) return
         if (patch.start !== undefined) b.start = patch.start
         if (patch.end !== undefined) b.end = patch.end
         // clamp into neighbors
         if (i > 0 && b.start < cp[i-1].end) cp[i-1].end = b.start
         if (i < cp.length - 1 && b.end > cp[i+1].start) cp[i+1].start = b.end
-        win.blocks = cp
+        win.blocksRev = (win.blocksRev + 1) % 2000000000
       }
       onTrimEdited: function (a, b) { win.trimIn = a; win.trimOut = b }
       onLayerEdited: function (i, a, b) { win.layers[i].inS = a; win.layers[i].outS = b; win.touchLayers() }
