@@ -53,11 +53,12 @@ Item {
   }
 
   Repeater {
-    model: ov.layers
+    // Keep delegates alive while fresh data snapshots cross QML boundaries.
+    model: ov.layers.length
     delegate: Item {
       id: ld
       required property int index
-      required property var modelData
+      readonly property var modelData: { ov.rev; return Object.assign({}, ov.layers[index]) }
       visible: { ov.rev; return ov.inRange(modelData) }
       z: index
 

@@ -7,5 +7,6 @@ native/qml_qrc.cpp
 native/qrc_qml.cpp
 
 # Local data / test outputs
+__pycache__/
 *.log
 .DS_Store

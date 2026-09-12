@@ -45,6 +45,50 @@ QT_QPA_PLATFORM=offscreen ./omareel-native --selftest   # headless pipeline: ren
 
 Deploy QML to the VM: `rsync -a --delete native/qml/ <vm>:~/.local/share/omareel/native-qml/`
 
+### Timeline regression tests
+
+The timeline tests load the actual QML component and send Qt mouse events
+headlessly. PySide6 is a test-only dependency; the editor remains C++/Qt6.
+From the repository root:
+
+```bash
+uv venv /tmp/omareel-qt-tests
+uv pip install --python /tmp/omareel-qt-tests/bin/python PySide6
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+  /tmp/omareel-qt-tests/bin/python -m unittest discover -s native/tests -v
+```
+
+For isolated native pipeline checks, set `OMAREEL_DATA` to a temporary
+directory containing a `media/` folder with a real source video before
+running `--selftest`; this avoids touching your working project.
+
+### Native live-editing integration test
+
+This test runs the real C++ engine and production QML in an isolated project.
+A separate Python process edits `project.json`, including repeated atomic
+replacements, and checks the visible PROGRAM, OUTPUT and timeline text,
+independent positions, color and trim values. It also types into the real
+layer input using Qt keyboard events, checks focus and autosave, then performs
+another external edit. Screenshots, observations and timings are retained in
+the temporary directory printed by the test.
+
+Requires Qt6 Quick, Multimedia and Test development packages, Python 3 and a
+real source video of at least ten seconds. From the repository root:
+
+```bash
+repo="$PWD"
+build="$(mktemp -d /tmp/omareel-live-build-XXXXXX)"
+(cd "$build" && qmake6 "$repo/native/tests/live_reload.pro" && make -j4)
+python3 native/tests/live_reload_e2e.py \
+  --binary "$build/live-reload-probe" --qml "$repo/native/qml/main.qml" \
+  --video /absolute/path/to/source.mp4
+```
+
+The default offscreen software mode verifies UI text and geometry, not video
+frame presentation. Add `--platform wayland` from a graphical session to run
+the same test with native video previews. Neither mode edits your working
+project or restarts the installed editor.
+
 ## Features (UI)
 
 - Dockable panels: SOURCES | PROGRAM+OUTPUT | LAYERS+GALLERY | INSPECTOR+RENDER.
@@ -58,6 +102,12 @@ Deploy QML to the VM: `rsync -a --delete native/qml/ <vm>:~/.local/share/omareel
   playhead, A-B loop, zoom, blocks (B track) with per-segment layouts
   (full/stack/pip/circle), track reorder from V1/T1/T2 headers,
   pinned to the bottom and vertically resizable only (`tlHeight`).
+- Magnetic timeline snapping: clip and trim edges align to the playhead,
+  other clip boundaries, and the source limits within an 8-pixel threshold.
+  Toggle **Snap** on the timeline or hold **Alt** while dragging to bypass it.
+  Moving a range preserves its duration; dragging either edge resizes it.
+- Right-drag the trim band or either trim handle to move the whole selection
+  without changing its length, including at the source boundaries.
 - Layers: text (QPainter rasterized), GIF, image, PiP video with shape
   (rect/rounded/circle — live OpacityMask, alphamerge+PNG mask on render).
 - RENDER panel: vertical and/or horizontal format at once, H.264/H.265/VP9 codec,
