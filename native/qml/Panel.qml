@@ -17,7 +17,7 @@ Rectangle {
   signal headerDragMove(real gx, real gy)
   signal headerDragEnd(real gx, real gy)
   default property alias content: body.data
-  color: T.panel; radius: T.radius; border.color: T.border
+  color: engine.theme.panel; radius: engine.theme.radius; border.color: engine.theme.border
 
   // drag only starts after a 6px move, so clicks/double-clicks never reorder
   component HeaderDragArea: MouseArea {
@@ -48,35 +48,35 @@ Rectangle {
     // header (drag to reorder, double-click or ▸ to collapse, ✕ to close)
     Rectangle {
       Layout.fillWidth: true; Layout.preferredHeight: 26
-      color: T.panelAlt; radius: T.radius
-      Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: T.border }
+      color: engine.theme.panelAlt; radius: engine.theme.radius
+      Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: engine.theme.border }
 
       RowLayout {
         anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 4
         Label {
-          text: "⠿"; color: T.textDim; font.pixelSize: 10
+          text: "⠿"; color: engine.theme.textDim; font.pixelSize: 10
           HeaderDragArea { anchors.fill: parent }
         }
         Label {
           Layout.fillWidth: true
-          text: panel.title.toUpperCase(); color: T.textMuted; font.pixelSize: 10; font.bold: true; font.letterSpacing: 1.2
+          text: panel.title.toUpperCase(); color: engine.theme.textMuted; font.pixelSize: 10; font.bold: true; font.letterSpacing: 1.2
           elide: Text.ElideRight
           HeaderDragArea { anchors.fill: parent }
         }
         Label {
           visible: panel.collapsible
           text: panel.collapsed ? "▾" : "▴"
-          color: T.textMuted; font.pixelSize: 11
+          color: engine.theme.textMuted; font.pixelSize: 11
           MouseArea { anchors.fill: parent; onClicked: panel.collapseToggled() }
         }
         Label {
           visible: panel.closable
-          text: "✕"; color: T.textDim; font.pixelSize: 10
+          text: "✕"; color: engine.theme.textDim; font.pixelSize: 10
           MouseArea {
             anchors.fill: parent; hoverEnabled: true
             onClicked: panel.closeRequested()
-            onEntered: parent.color = T.bad
-            onExited: parent.color = T.textDim
+            onEntered: parent.color = engine.theme.bad
+            onExited: parent.color = engine.theme.textDim
           }
         }
       }

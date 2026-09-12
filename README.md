@@ -2,6 +2,8 @@
 
 ![Omareel — native Qt6/QML video editor for Omarchy](preview.png)
 
+[Watch the rendered keyframes, easing and fades demo](examples/omareel-keyframes-fades-preview.mp4)
+
 Local clip editor for Omarchy. **Native C++/Qt6/QML build — no server,
 no internet, no Electron.** Processing via the system ffmpeg/ffprobe.
 
@@ -17,6 +19,7 @@ native/
   src/main.cpp         entry point, --selftest, --uitest* flags
   qml/                 QML UI: main.qml (dock), Timeline, Panel, OverlayLayers,
                        OutputPreview, RegionEditor, Theme.js (tokens), I18n.js
+  qml.qrc              embedded release fallback for the complete QML UI
   omareel-native.pro   qmake6
 ```
 
@@ -25,7 +28,7 @@ native/
   - `media/` sources, `media/clips/` cuts, `out/` renders (`*-v.mp4` vertical,
     `*-h.mp4` horizontal), `out/thumbs/`
   - `project.json` AI-editable project with live reload
-  - `native-qml/` deployed QML (the app runs against this copy)
+  - `native-qml/` optional mutable QML override; release binaries also embed the UI
 
 ## Build & run
 
@@ -33,6 +36,7 @@ native/
 cd native && qmake6 omareel-native.pro && make -j4
 ./omareel-native              # GUI (Wayland/Hyprland)
 QT_QPA_PLATFORM=offscreen ./omareel-native --selftest   # headless pipeline: render -> verify
+sudo make install             # installs the binary and bundled ASR helper
 
 # deterministic flags for screenshots/verification:
 --uitest            # trim 5-10s, loop, 2 text layers
@@ -44,6 +48,22 @@ QT_QPA_PLATFORM=offscreen ./omareel-native --selftest   # headless pipeline: ren
 ```
 
 Deploy QML to the VM: `rsync -a --delete native/qml/ <vm>:~/.local/share/omareel/native-qml/`
+
+### Offline subtitles
+
+The subtitle action launches `native/scripts/transcribe_local.py` locally. It
+never downloads a model or contacts a service. Point it at an existing
+faster-whisper environment and CTranslate2 model:
+
+```bash
+export OMAREEL_ASR_PYTHON=/path/to/faster-whisper-venv/bin/python
+export OMAREEL_ASR_MODEL=/path/to/local-ctranslate2-model
+# Optional when the script is not at ./scripts/transcribe_local.py:
+export OMAREEL_ASR_SCRIPT=/path/to/transcribe_local.py
+```
+
+Normal mode burns the generated SRT in a fixed movie position. Reel mode turns
+each cue into an editable, timed text layer.
 
 ### Timeline regression tests
 
@@ -110,11 +130,18 @@ project or restarts the installed editor.
   without changing its length, including at the source boundaries.
 - Layers: text (QPainter rasterized), GIF, image, PiP video with shape
   (rect/rounded/circle — live OpacityMask, alphamerge+PNG mask on render).
+- Layer keyframes tween position, dimensions and text size with linear, ease-in,
+  ease-out, ease-in-out, back-out or bounce curves. Per-layer opacity and
+  fade-in/fade-out are identical in the live previews and rendered MP4.
 - RENDER panel: vertical and/or horizontal format at once, H.264/H.265/VP9 codec,
   CRF 18/23/28 quality, job queue with progress.
 - `project.json` project: ~1.5s autosave + **live reload** on external edits
   (QFileSystemWatcher + hash guard) — designed for LLMs.
   Format: `docs/project-format.md`.
+- `examples/keyframes-fades-demo.project.json` is a portable 10-second demo;
+  open it directly to inspect the layouts, keyframes, tweens and fades.
+  Its committed abstract source can be regenerated offline with
+  `python3 examples/generate_demo_source.py` (Pillow and ffmpeg are required).
 - es/en i18n (`qml/I18n.js`), persisted in the engine.
 
 ## Render engine
@@ -147,10 +174,19 @@ project or restarts the installed editor.
 - `rsync --delete` of the QML targets `~/.local/share/omareel/native-qml/`, not the
   source tree.
 
-## Verified state (2026-09-10, Omarchy QEMU VM)
+## Known issues
+
+- The MAIN source-frame rectangle can drift by a very small amount while it is
+  resized from a corner. PiP corner resizing does not exhibit this drift.
+
+## Verified state (2026-09-12, Omarchy aarch64 host)
 
 - `--selftest`: PASS (1080×1920 render verified with ffprobe).
 - Dual render end-to-end: `-v.mp4` 1080×1920 and `-h.mp4` 1920×1080, both
   10.000s with 0-10s blocks; layers respect inS/outS
   (`between(t,5,10)` / `between(t,6,9)`); texts in different positions per
   format (dual-space confirmed visually).
+- Exported keyframe motion and size tweening are checked from decoded pixels;
+  fade-in/fade-out are checked at the beginning, middle and end of a real MP4.
+- The portable demo render is 1080×1920, H.264, 30 fps, 10.000 s and 300
+  decoded frames (`examples/omareel-keyframes-fades-preview.mp4`).

@@ -13,6 +13,7 @@
 #include <QMutex>
 #include <QWaitCondition>
 #include <QFileSystemWatcher>
+#include <QTimer>
 #include <QHash>
 
 struct EngineTask {
@@ -34,6 +35,7 @@ signals:
   void renderProgress(const QString &jobId, double pct);
   void renderDone(const QString &jobId, const QString &outPath);
   void taskError(const QString &jobId, const QString &message);
+  void subtitlesReady(const QString &srtPath);
 public:
   QMutex mutex;
   QWaitCondition cond;
@@ -48,12 +50,15 @@ private:
 class OmareelEngine : public QObject {
   Q_OBJECT
   Q_PROPERTY(QString dataDir READ dataDir CONSTANT)
+  Q_PROPERTY(QString projectFile READ projectPath NOTIFY projectFileChanged)
+  Q_PROPERTY(QVariantMap theme READ theme NOTIFY themeChanged)
   Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)
 public:
   explicit OmareelEngine(QObject *parent = nullptr);
   ~OmareelEngine() override;
 
   QString dataDir() const { return m_dataDir; }
+  QVariantMap theme() const { return m_theme; }
   QString language() const { return m_lang; }
   void setLanguage(const QString &l);
 
@@ -72,6 +77,8 @@ public:
   // Pipeline
   Q_INVOKABLE void cut(const QString &sessionPath, double start, double end);
   Q_INVOKABLE void renderVertical(const QVariantMap &params);
+  Q_INVOKABLE void transcribeAudio(const QString &clipPath, const QString &language);
+  Q_INVOKABLE QVariantList subtitleLayers(const QString &srtPath, bool reelStyle) const;
   // params: clipPath, template ("completa"|"apilar"), regions {main:{x,y,w,h}} or
   // {top:{...}, bottom:{...}, split}, layers [ {text,x,y,size,color,font,in,out} ],
   // srtPath ("" = none), all region coords in PERCENT of source (0-100).
@@ -80,9 +87,11 @@ public:
   Q_INVOKABLE QString rasterizeText(const QVariantMap &layer);
 
   // Project file (simple JSON, AI-editable; external edits reload live)
-  Q_INVOKABLE QString projectPath() const { return m_dataDir + QStringLiteral("/project.json"); }
+  Q_INVOKABLE QString projectPath() const { return m_projectFile; }
   Q_INVOKABLE QVariantMap loadProject();                 // read project.json ({} if none)
-  Q_INVOKABLE void saveProject(const QVariantMap &doc);  // write + remember hash (watcher ignores self)
+  Q_INVOKABLE bool saveProject(const QVariantMap &doc);  // atomic write + remember hash
+  Q_INVOKABLE QVariantMap openProjectFile(const QString &fileUrl);
+  Q_INVOKABLE bool saveProjectAs(const QString &fileUrl, const QVariantMap &doc);
 
 signals:
   void languageChanged();
@@ -92,7 +101,10 @@ signals:
   void renderProgress(const QString &jobId, double pct);
   void renderDone(const QString &jobId, const QString &outPath);
   void taskError(const QString &jobId, const QString &message);
+  void subtitlesReady(const QString &srtPath);
   void projectChangedExternally(const QVariantMap &doc);
+  void projectFileChanged();
+  void themeChanged();
 
 private:
   void enqueue(const EngineTask &t);
@@ -101,8 +113,18 @@ private:
   QThread m_thread;
   EngineWorker *m_worker;
   QFileSystemWatcher m_projWatcher;
+  QFileSystemWatcher m_themeWatcher;
+  QTimer m_themeDebounce;
+  QTimer m_themeRecovery;
+  QStringList m_themePaths;
+  QString m_projectFile;
+  QVariantMap m_theme;
   QHash<QString, QVariantMap> m_probeCache;
   QByteArray m_lastProjHash;
+  void watchProjectFile();
+  bool setProjectFile(const QString &fileUrl);
+  void loadTheme();
+  void watchTheme();
 };
 
 #endif

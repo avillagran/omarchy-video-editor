@@ -54,15 +54,18 @@ Item {
     onTriggered: { op.syncPlayer(pMain); op.syncPlayer(pBot); op.syncPlayer(pFg) }
   }
 
-  ColumnLayout {
-    anchors.fill: parent; spacing: 0
-    Item { Layout.fillHeight: true }
+  Item {
+    anchors.fill: parent
     Rectangle {
       id: frame
-      Layout.alignment: Qt.AlignHCenter
-      Layout.preferredHeight: op.height - 8
-      Layout.preferredWidth: Math.min((op.height - 8) * 9 / 16, op.width - 8)
-      color: "#000"; radius: 4; border.color: T.border; clip: true
+      objectName: "outputFrame"
+      anchors.centerIn: parent
+      // Keep the monitor itself at 9:16. A ColumnLayout's independent preferred
+      // width/height stretched it in narrow docks, making layers drift relative
+      // to the image although their design coordinates had not changed.
+      width: Math.max(2, Math.min(parent.width - 8, (parent.height - 8) * 9 / 16))
+      height: width * 16 / 9
+      color: "#000"; radius: 4; border.color: engine.theme.border; clip: true
 
       Item {
         id: stage; anchors.fill: parent
@@ -79,9 +82,13 @@ Item {
             property real rw: Math.max(1, zoneA.region.w / 100 * op.srcW)
             property real rh: Math.max(1, zoneA.region.h / 100 * op.srcH)
             property real k: Math.max(zoneA.width / rw, zoneA.height / rh)
+            // Same centered "cover" crop as Stream's clipFraming.drawCover().
+            // The selected source region can be wider/taller than its output slot.
+            property real visibleW: zoneA.width / k
+            property real visibleH: zoneA.height / k
             width: op.srcW * k; height: op.srcH * k
-            x: -(zoneA.region.x / 100 * op.srcW) * k
-            y: -(zoneA.region.y / 100 * op.srcH) * k
+            x: -((zoneA.region.x / 100 * op.srcW) + (rw - visibleW) / 2) * k
+            y: -((zoneA.region.y / 100 * op.srcH) + (rh - visibleH) / 2) * k
           }
         }
 
@@ -98,9 +105,12 @@ Item {
             property real rw: Math.max(1, zoneB.region.w / 100 * op.srcW)
             property real rh: Math.max(1, zoneB.region.h / 100 * op.srcH)
             property real k: Math.max(zoneB.width / rw, zoneB.height / rh)
+            // Same centered "cover" crop as Stream's clipFraming.drawCover().
+            property real visibleW: zoneB.width / k
+            property real visibleH: zoneB.height / k
             width: op.srcW * k; height: op.srcH * k
-            x: -(zoneB.region.x / 100 * op.srcW) * k
-            y: -(zoneB.region.y / 100 * op.srcH) * k
+            x: -((zoneB.region.x / 100 * op.srcW) + (rw - visibleW) / 2) * k
+            y: -((zoneB.region.y / 100 * op.srcH) + (rh - visibleH) / 2) * k
           }
         }
 
@@ -114,7 +124,7 @@ Item {
           y: (op.pipFy * stage.height) - side / 2
           radius: op.layout === "circulo" ? side / 2 : 4
           color: "transparent"
-          border.color: op.layout === "circulo" ? T.magenta : T.border
+          border.color: op.layout === "circulo" ? engine.theme.magenta : engine.theme.border
           border.width: op.layout === "circulo" ? 3 : 1
           // square mode: direct child with plain clip; circle mode: masked via OpacityMask
           Item {
@@ -140,19 +150,32 @@ Item {
           }
         }
 
-        // layers over the output (fractions map to 1080x1920)
-        OverlayLayers {
-          anchors.fill: parent; layers: op.layers; position: op.position; playing: op.playing
-          space: "out"; refH: 1920; rev: op.layersRev
-          onLayerMoved: function (i, patch) { op.layerMoved(i, patch) }
-          onLayerPressed: function (i) { op.layerPressed(i) }
+        // The output composition lives on an absolute 1080×1920 design canvas.
+        // The editor only scales this canvas as one unit, so panel resizing never
+        // changes a layer's output coordinates or lets it drift with the dock.
+        Item {
+          id: outputCanvas
+          objectName: "outputCanvas"
+          width: 1080; height: 1920
+          readonly property real canvasScale: Math.min(stage.width / width, stage.height / height)
+          scale: canvasScale
+          x: (stage.width - width * canvasScale) / 2
+          y: (stage.height - height * canvasScale) / 2
+          transformOrigin: Item.TopLeft
+          z: 10
+          OverlayLayers {
+            anchors.fill: parent; layers: op.layers; position: op.position; playing: op.playing
+            space: "out"; refH: 1920; rev: op.layersRev
+            onLayerMoved: function (i, patch) { op.layerMoved(i, patch) }
+            onLayerPressed: function (i) { op.layerPressed(i) }
+          }
         }
 
         // split divider (apilar)
         Rectangle {
           visible: op.layout === "apilar"
           y: op.splitFrac * stage.height - 6; width: stage.width; height: 12
-          color: T.orange; z: 20
+          color: engine.theme.orange; z: 20
           Label { anchors.centerIn: parent; text: "⇕ split"; color: "#16161e"; font.pixelSize: 9; font.bold: true }
           MouseArea {
             anchors.fill: parent; cursorShape: Qt.SizeVerCursor
@@ -161,6 +184,5 @@ Item {
         }
       }
     }
-    Item { Layout.fillHeight: true }
   }
 }

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "app": "omareel",
-  "video": "/home/avillagran/.local/share/omareel/media/Big_Buck_Bunny_720_10s_1MB.mp4",
+  "video": "assets/omareel-motion-source.mp4",
   "trim": { "in": 0, "out": 10 },
   "template": "apilar",
   "region": { "x": 0, "y": 0, "w": 100, "h": 100 },

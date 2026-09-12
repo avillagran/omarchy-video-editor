@@ -3,17 +3,19 @@
 QT_QPA_PLATFORM=offscreen python -m unittest discover -s native/tests -v
 """
 import os
+import warnings
 from pathlib import Path
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-from PySide6.QtCore import QPoint, QUrl, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QUrl, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQuick import QQuickView
 from PySide6.QtTest import QTest
-from PySide6.QtQml import QQmlComponent
+from PySide6.QtQml import QQmlComponent, QQmlPropertyMap
 
 
 class TrimDragTest(unittest.TestCase):
@@ -22,7 +24,17 @@ class TrimDragTest(unittest.TestCase):
         cls.app = QGuiApplication.instance() or QGuiApplication([])
 
     def setUp(self):
+        warnings.simplefilter("ignore", DeprecationWarning)
         self.view = QQuickView()
+        self.engine_context = QQmlPropertyMap()
+        self.engine_context.insert("theme", {
+            "panel": "#151515", "panelDeep": "#111111", "panelAlt": "#181818", "border": "#333333", "radius": 4,
+            "text": "#ffffff", "textMuted": "#aaaaaa", "textDim": "#777777",
+            "accent": "#55aaff", "accentSoft": "#223344", "magenta": "#dd66ff",
+            "orange": "#ffaa44", "cyan": "#66ddff", "playhead": "#ff5577",
+            "good": "#66dd88", "bad": "#ff5577", "warn": "#ddaa55", "fontMono": "monospace",
+        })
+        self.view.engine().rootContext().setContextProperty("engine", self.engine_context)
         self.component = QQmlComponent(self.view.engine())
         qml_dir = Path(__file__).resolve().parents[1] / "qml"
         self.component.setData(b'''import QtQuick
@@ -43,8 +55,10 @@ Timeline {
 
     def tearDown(self):
         self.view.close()
+        self.timeline.deleteLater()
         self.view.deleteLater()
         self.app.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def drag(self, start_time, delta, button=Qt.RightButton):
         x = 47 + round(start_time * 50)

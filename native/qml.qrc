@@ -1,0 +1,17 @@
+<RCC>
+  <qresource prefix="/">
+    <file>qml/main.qml</file>
+    <file>qml/CropGeometry.js</file>
+    <file>qml/FnCombo.qml</file>
+    <file>qml/FnField.qml</file>
+    <file>qml/FnSpin.qml</file>
+    <file>qml/I18n.js</file>
+    <file>qml/Keyframes.js</file>
+    <file>qml/OutputPreview.qml</file>
+    <file>qml/OverlayLayers.qml</file>
+    <file>qml/Panel.qml</file>
+    <file>qml/RegionEditor.qml</file>
+    <file>qml/Theme.js</file>
+    <file>qml/Timeline.qml</file>
+  </qresource>
+</RCC>

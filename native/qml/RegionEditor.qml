@@ -3,6 +3,7 @@
 import QtQuick
 import QtQuick.Controls
 import "Theme.js" as T
+import "CropGeometry.js" as Crop
 
 Item {
   id: re
@@ -16,6 +17,10 @@ Item {
   property bool lock916: false
   property real srcW: 1920
   property real srcH: 1080
+  property string boxALabel: "TOP"
+  property string boxBLabel: "BOT"
+  property real aspectA: 9 / 16
+  property real aspectB: 9 / 16
 
   signal boxAEdited(var b)
   signal boxBEdited(var b)
@@ -47,9 +52,9 @@ Item {
       id: boxRect
       x: boxA.x / 100 * re.width; y: boxA.y / 100 * re.height
       width: boxA.w / 100 * re.width; height: boxA.h / 100 * re.height
-      color: "transparent"; border.color: T.accent; border.width: 2
+      color: "transparent"; border.color: engine.theme.accent; border.width: 2
       // center crosshair
-      Label { anchors.centerIn: parent; text: "✛"; color: T.accent; opacity: 0.7 }
+      Label { anchors.centerIn: parent; text: "✛"; color: engine.theme.accent; opacity: 0.7 }
       MouseArea {
         anchors.fill: parent; cursorShape: Qt.DragMoveCursor
         property real sx: 0; property real sy: 0
@@ -64,23 +69,28 @@ Item {
       Repeater {
         model: ["nw", "ne", "sw", "se"]
         delegate: Rectangle {
+          id: mainHandle
           required property string modelData
           x: (modelData.endsWith("w") ? 0 : boxRect.width) - 8
           y: (modelData.startsWith("n") ? 0 : boxRect.height) - 8
-          width: 16; height: 16; color: T.accent; radius: 3
+          width: 16; height: 16; color: engine.theme.accent; radius: 3
           z: 10
           MouseArea {
+            objectName: "handle-main-" + mainHandle.modelData
             anchors.fill: parent
-            cursorShape: modelData === "nw" || modelData === "se" ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
+            preventStealing: true
+            property var startBox: ({})
+            cursorShape: mainHandle.modelData === "nw" || mainHandle.modelData === "se" ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
+            onPressed: startBox = { x: re.boxA.x, y: re.boxA.y, w: re.boxA.w, h: re.boxA.h }
             onPositionChanged: if (pressed) {
               var gx = mapToItem(re, mouse.x, mouse.y).x / re.width * 100
               var gy = mapToItem(re, mouse.x, mouse.y).y / re.height * 100
-              var b = { x: boxA.x, y: boxA.y, w: boxA.w, h: boxA.h }
-              if (modelData.endsWith("w")) { var nx = Math.min(gx, b.x + b.w - 5); b.w += b.x - nx; b.x = nx }
+              var b = { x: startBox.x, y: startBox.y, w: startBox.w, h: startBox.h }
+              if (mainHandle.modelData.endsWith("w")) { var nx = Math.min(gx, b.x + b.w - 5); b.w += b.x - nx; b.x = nx }
               else b.w = Math.max(5, gx - b.x)
-              if (modelData.startsWith("n")) { var ny = Math.min(gy, b.y + b.h - 5); b.h += b.y - ny; b.y = ny }
+              if (mainHandle.modelData.startsWith("n")) { var ny = Math.min(gy, b.y + b.h - 5); b.h += b.y - ny; b.y = ny }
               else b.h = Math.max(5, gy - b.y)
-              b = re.applyLock(re.clampB(b))
+              b = Crop.fitCorner(re.clampB(b), mainHandle.modelData, re.aspectA, re.srcW, re.srcH)
               re.boxAEdited(b)
             }
           }
@@ -101,8 +111,8 @@ Item {
         property var bx: modelData === "A" ? re.boxA : re.boxB
         x: bx.x / 100 * re.width; y: bx.y / 100 * re.height
         width: bx.w / 100 * re.width; height: bx.h / 100 * re.height
-        color: "transparent"; border.color: modelData === "A" ? T.cyan : T.magenta; border.width: 2
-        Label { anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 3; text: modelData === "A" ? "TOP" : "BOT"; color: modelData === "A" ? T.cyan : T.magenta; font.pixelSize: 9; font.bold: true }
+        color: "transparent"; border.color: modelData === "A" ? engine.theme.cyan : engine.theme.magenta; border.width: 2
+        Label { anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 3; text: modelData === "A" ? re.boxALabel : re.boxBLabel; color: modelData === "A" ? engine.theme.cyan : engine.theme.magenta; font.pixelSize: 9; font.bold: true }
         MouseArea {
           anchors.fill: parent; cursorShape: Qt.DragMoveCursor
           property real sx: 0; property real sy: 0
@@ -117,25 +127,34 @@ Item {
         Repeater {
           model: ["nw", "ne", "sw", "se"]
           delegate: Rectangle {
+            id: apHandle
             required property string modelData
             x: (modelData.endsWith("w") ? 0 : apBox.width) - 7
             y: (modelData.startsWith("n") ? 0 : apBox.height) - 7
             width: 14; height: 14; color: apBox.border.color; radius: 3; z: 10
             MouseArea {
+              objectName: "handle-" + apBox.modelData + "-" + apHandle.modelData
               anchors.fill: parent
-              cursorShape: modelData === "nw" || modelData === "se" ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
-              onPositionChanged: if (pressed) {
+              preventStealing: true
+              property var startBox: ({})
+              cursorShape: apHandle.modelData === "nw" || apHandle.modelData === "se" ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
+              onPressed: function(mouse) {
                 var cur = apBox.bx
+                startBox = { x: cur.x, y: cur.y, w: cur.w, h: cur.h }
+              }
+              onPositionChanged: function(mouse) { if (pressed) {
                 var gx = mapToItem(re, mouse.x, mouse.y).x / re.width * 100
                 var gy = mapToItem(re, mouse.x, mouse.y).y / re.height * 100
-                var b = { x: cur.x, y: cur.y, w: cur.w, h: cur.h }
-                if (modelData.endsWith("w")) { var nx = Math.min(gx, b.x + b.w - 5); b.w += b.x - nx; b.x = nx }
+                var b = { x: startBox.x, y: startBox.y, w: startBox.w, h: startBox.h }
+                if (apHandle.modelData.endsWith("w")) { var nx = Math.min(gx, b.x + b.w - 5); b.w += b.x - nx; b.x = nx }
                 else b.w = Math.max(5, gx - b.x)
-                if (modelData.startsWith("n")) { var ny = Math.min(gy, b.y + b.h - 5); b.h += b.y - ny; b.y = ny }
+                if (apHandle.modelData.startsWith("n")) { var ny = Math.min(gy, b.y + b.h - 5); b.h += b.y - ny; b.y = ny }
                 else b.h = Math.max(5, gy - b.y)
-                b = re.clampB(b)
+                b = Crop.fitCorner(re.clampB(b), apHandle.modelData,
+                                   apBox.modelData === "A" ? re.aspectA : re.aspectB,
+                                   re.srcW, re.srcH)
                 if (apBox.modelData === "A") re.boxAEdited(b); else re.boxBEdited(b)
-              }
+              } }
             }
           }
         }
@@ -145,7 +164,7 @@ Item {
     Rectangle {
       visible: re.mode === 1 && re.showSplit
       y: re.splitFrac * re.height - 3; width: re.width; height: 6
-      color: T.orange; opacity: 0.85
+      color: engine.theme.orange; opacity: 0.85
       Label { anchors.centerIn: parent; text: "⇕"; color: "#16161e"; font.pixelSize: 9 }
       MouseArea {
         anchors.fill: parent; cursorShape: Qt.SizeVerCursor

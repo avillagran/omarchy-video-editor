@@ -80,7 +80,7 @@ Item {
   readonly property int layerH: 28
   readonly property int blockH: 26
 
-  Rectangle { anchors.fill: parent; color: T.panelDeep; radius: T.radius; border.color: T.border }
+  Rectangle { anchors.fill: parent; color: engine.theme.panelDeep; radius: engine.theme.radius; border.color: engine.theme.border }
 
   // ---------- header column (fixed) ----------
   Item {
@@ -89,22 +89,22 @@ Item {
     Rectangle { anchors.fill: parent; color: "transparent" }
     // ruler corner with zoom controls
     Rectangle {
-      x: 0; y: 0; width: parent.width; height: tl.rulerH; color: T.panel
-      Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: T.border }
+      x: 0; y: 0; width: parent.width; height: tl.rulerH; color: engine.theme.panel
+      Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: engine.theme.border }
       Row {
         anchors.centerIn: parent; spacing: 0
-        Label { text: "−"; color: T.textMuted; font.pixelSize: 11; width: 16; horizontalAlignment: Text.AlignHCenter; MouseArea { anchors.fill: parent; onClicked: tl.zoomBy(1/1.5, tl.position) } }
-        Label { text: "+"; color: T.textMuted; font.pixelSize: 11; width: 16; horizontalAlignment: Text.AlignHCenter; MouseArea { anchors.fill: parent; onClicked: tl.zoomBy(1.5, tl.position) } }
+        Label { text: "−"; color: engine.theme.textMuted; font.pixelSize: 11; width: 16; horizontalAlignment: Text.AlignHCenter; MouseArea { anchors.fill: parent; onClicked: tl.zoomBy(1/1.5, tl.position) } }
+        Label { text: "+"; color: engine.theme.textMuted; font.pixelSize: 11; width: 16; horizontalAlignment: Text.AlignHCenter; MouseArea { anchors.fill: parent; onClicked: tl.zoomBy(1.5, tl.position) } }
       }
     }
     Rectangle {  // B (blocks)
-      x: 0; y: tl.rulerH; width: parent.width; height: tl.blockH; color: T.panelAlt
-      Label { anchors.centerIn: parent; text: "B"; color: T.orange; font.bold: true; font.pixelSize: 11 }
-      Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: T.border }
+      x: 0; y: tl.rulerH; width: parent.width; height: tl.blockH; color: engine.theme.panelAlt
+      Label { anchors.centerIn: parent; text: "B"; color: engine.theme.orange; font.bold: true; font.pixelSize: 11 }
+      Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: engine.theme.border }
     }
     Rectangle {  // V1
-      x: 0; y: tl.rulerH + tl.blockH; width: parent.width; height: tl.stripH; color: T.panelAlt
-      Label { anchors.horizontalCenter: parent.horizontalCenter; y: 5; text: "V1"; color: T.textMuted; font.bold: true; font.pixelSize: 11 }
+      x: 0; y: tl.rulerH + tl.blockH; width: parent.width; height: tl.stripH; color: engine.theme.panelAlt
+      Label { anchors.horizontalCenter: parent.horizontalCenter; y: 5; text: "V1"; color: engine.theme.textMuted; font.bold: true; font.pixelSize: 11 }
       ToolButton {
         id: snapButton
         objectName: "snappingToggle"
@@ -120,16 +120,16 @@ Item {
         contentItem: Text {
           text: snapButton.text; font: snapButton.font
           horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-          color: snapButton.checked ? T.accent : T.textMuted
+          color: snapButton.checked ? engine.theme.accent : engine.theme.textMuted
         }
         background: Rectangle {
           radius: 3
-          color: snapButton.checked ? T.accentSoft : T.panelDeep
-          border.color: snapButton.activeFocus || snapButton.checked ? T.accent : T.border
+          color: snapButton.checked ? engine.theme.accentSoft : engine.theme.panelDeep
+          border.color: snapButton.activeFocus || snapButton.checked ? engine.theme.accent : engine.theme.border
         }
         onToggled: tl.snappingEnabled = checked
       }
-      Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: T.border }
+      Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: engine.theme.border }
     }
     Item {
       x: 0; y: tl.rulerH + tl.blockH + tl.stripH; width: parent.width
@@ -140,10 +140,10 @@ Item {
           required property int index
           x: 0; y: index * tl.layerH
           width: headers.width; height: tl.layerH
-          color: tl.dragHeaderOver === index && tl.dragHeaderFrom !== index ? T.accentSoft : T.panelAlt
-          border.color: tl.dragHeaderOver === index && tl.dragHeaderFrom !== index ? T.accent : "transparent"
-          Label { anchors.centerIn: parent; text: "T" + (index + 1); color: tl.selectedLayer === index ? T.good : T.textDim; font.bold: true; font.pixelSize: 10 }
-          Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: T.border }
+          color: tl.dragHeaderOver === index && tl.dragHeaderFrom !== index ? engine.theme.accentSoft : engine.theme.panelAlt
+          border.color: tl.dragHeaderOver === index && tl.dragHeaderFrom !== index ? engine.theme.accent : "transparent"
+          Label { anchors.centerIn: parent; text: "T" + (index + 1); color: tl.selectedLayer === index ? engine.theme.good : engine.theme.textDim; font.bold: true; font.pixelSize: 10 }
+          Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: engine.theme.border }
           // drag vertically to reorder the layer track
           MouseArea {
             anchors.fill: parent; cursorShape: Qt.SizeVerCursor
@@ -197,7 +197,7 @@ Item {
       // ruler
       Item {
         id: ruler; x: 0; y: 0; width: tracks.width; height: tl.rulerH
-        Rectangle { anchors.fill: parent; color: T.panel }
+        Rectangle { anchors.fill: parent; color: engine.theme.panel }
         Repeater {
           id: tickRep
           model: Math.floor(tl.duration / tickRep.step) + 1
@@ -210,10 +210,10 @@ Item {
           delegate: Item {
             required property int index
             x: tl.t2x(index * tickRep.step); height: ruler.height
-            Rectangle { width: 1; height: 7; color: T.textDim; anchors.bottom: parent.bottom }
+            Rectangle { width: 1; height: 7; color: engine.theme.textDim; anchors.bottom: parent.bottom }
             Label {
               anchors.bottom: parent.bottom; anchors.bottomMargin: 7; anchors.left: parent.left; anchors.leftMargin: 3
-              text: tl.fmt(index * tickRep.step); color: T.textMuted; font.pixelSize: 9; font.family: T.fontMono
+              text: tl.fmt(index * tickRep.step); color: engine.theme.textMuted; font.pixelSize: 9; font.family: engine.theme.fontMono
               visible: x + width < ruler.width
             }
           }
@@ -229,11 +229,11 @@ Item {
       // blocks row (B): per-range layouts
       Item {
         id: blockRow; x: 0; y: tl.rulerH; width: tracks.width; height: tl.blockH
-        Rectangle { anchors.fill: parent; color: T.panelDeep }
+        Rectangle { anchors.fill: parent; color: engine.theme.panelDeep }
         Label {
           visible: tl.blocks.length === 0
           anchors.centerIn: parent
-          text: "✂B = split block at playhead"; color: T.textDim; font.pixelSize: 9
+          text: "✂B = split block at playhead"; color: engine.theme.textDim; font.pixelSize: 9
         }
         Repeater {
           model: tl.blocks.length
@@ -241,7 +241,7 @@ Item {
             id: bb
             required property int index
             readonly property var clipData: { tl.blocksRev; return Object.assign({}, tl.blocks[index]) }
-            function lc() { return clipData.layout === "apilar" ? T.orange : (clipData.layout === "pip" ? T.cyan : (clipData.layout === "circulo" ? T.magenta : T.accent)) }
+            function lc() { return clipData.layout === "apilar" ? engine.theme.orange : (clipData.layout === "pip" ? engine.theme.cyan : (clipData.layout === "circulo" ? engine.theme.magenta : engine.theme.accent)) }
             x: tl.t2x(clipData.start); width: Math.max(14, tl.t2x(clipData.end - clipData.start)); height: tl.blockH
             Rectangle {
               anchors.fill: parent; anchors.margins: 1; radius: 4
@@ -300,7 +300,7 @@ Item {
       // filmstrip (V1)
       Item {
         id: strip; x: 0; y: tl.rulerH + tl.blockH; width: tracks.width; height: tl.stripH
-        Rectangle { anchors.fill: parent; color: T.panelDeep }
+        Rectangle { anchors.fill: parent; color: engine.theme.panelDeep }
         Row {
           x: 2; y: 2; height: tl.stripH - 4; spacing: 1
           Repeater {
@@ -316,9 +316,9 @@ Item {
         Rectangle { x: tl.t2x(tl.trimOut); width: strip.width - x; height: parent.height; color: "#000"; opacity: 0.78 }
         Item {
           x: tl.t2x(tl.trimIn); width: tl.t2x(tl.trimOut - tl.trimIn); height: parent.height
-          Rectangle { anchors.fill: parent; color: T.accent; opacity: 0.08 }
-          Rectangle { anchors.top: parent.top; width: parent.width; height: 2; color: T.accent }
-          Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2; color: T.accent }
+          Rectangle { anchors.fill: parent; color: engine.theme.accent; opacity: 0.08 }
+          Rectangle { anchors.top: parent.top; width: parent.width; height: 2; color: engine.theme.accent }
+          Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 2; color: engine.theme.accent }
           // right-drag anywhere inside the range MOVES the whole trim selection
           MouseArea {
             anchors.fill: parent; preventStealing: true
@@ -336,7 +336,7 @@ Item {
         }
         Rectangle {  // in handle
           x: tl.t2x(tl.trimIn) - 5; width: 10; height: parent.height
-          color: T.accent; radius: 2
+          color: engine.theme.accent; radius: 2
           Label { anchors.centerIn: parent; text: "▮"; color: "#16161e"; font.pixelSize: 8 }
           MouseArea {
             anchors.fill: parent; cursorShape: Qt.SizeHorCursor; preventStealing: true
@@ -358,7 +358,7 @@ Item {
         }
         Rectangle {  // out handle
           x: tl.t2x(tl.trimOut) - 5; width: 10; height: parent.height
-          color: T.accent; radius: 2
+          color: engine.theme.accent; radius: 2
           Label { anchors.centerIn: parent; text: "▮"; color: "#16161e"; font.pixelSize: 8 }
           MouseArea {
             anchors.fill: parent; cursorShape: Qt.SizeHorCursor; preventStealing: true
@@ -393,7 +393,7 @@ Item {
           readonly property var clipData: { tl.layersRev; return Object.assign({}, tl.layers[index]) }
           x: 0; y: tl.rulerH + tl.blockH + tl.stripH + index * tl.layerH
           width: tracks.width; height: tl.layerH
-          Rectangle { anchors.fill: parent; color: index % 2 ? T.panelDeep : T.panelAlt; opacity: 0.6 }
+          Rectangle { anchors.fill: parent; color: index % 2 ? engine.theme.panelDeep : engine.theme.panelAlt; opacity: 0.6 }
           Rectangle {
             id: block
             x: tl.t2x(track.clipData.inS) + 1
@@ -404,14 +404,14 @@ Item {
               GradientStop { position: 0; color: tl.selectedLayer === index ? "#5d8a4a" : "#3d4d68" }
               GradientStop { position: 1; color: tl.selectedLayer === index ? "#496b3a" : "#2f3c55" }
             }
-            border.color: tl.selectedLayer === index ? T.good : T.border
+            border.color: tl.selectedLayer === index ? engine.theme.good : engine.theme.border
             border.width: tl.selectedLayer === index ? 2 : 1
             Label {
               anchors.left: parent.left; anchors.leftMargin: 7; anchors.verticalCenter: parent.verticalCenter
               width: parent.width - 14
               text: track.clipData.text || "—"
               elide: Text.ElideRight
-              color: T.text; font.pixelSize: 10
+              color: engine.theme.text; font.pixelSize: 10
             }
             MouseArea {
               anchors.fill: parent; preventStealing: true
@@ -454,11 +454,11 @@ Item {
       Rectangle {
         id: ph
         x: tl.t2x(tl.position); width: 2; height: tracks.height; y: 0
-        color: T.playhead; z: 10
+        color: engine.theme.playhead; z: 10
         Canvas {
           anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter
           width: 11; height: 8
-          onPaint: { var c = getContext("2d"); c.fillStyle = T.playhead; c.beginPath(); c.moveTo(0,0); c.lineTo(width,0); c.lineTo(width/2,height); c.closePath(); c.fill() }
+          onPaint: { var c = getContext("2d"); c.fillStyle = engine.theme.playhead; c.beginPath(); c.moveTo(0,0); c.lineTo(width,0); c.lineTo(width/2,height); c.closePath(); c.fill() }
         }
         MouseArea {
           anchors.verticalCenter: parent.verticalCenter; anchors.horizontalCenter: parent.horizontalCenter

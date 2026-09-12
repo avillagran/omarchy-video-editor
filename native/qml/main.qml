@@ -6,13 +6,15 @@ import QtQuick.Dialogs
 import QtMultimedia
 import "I18n.js" as I18n
 import "Theme.js" as T
+import "CropGeometry.js" as Crop
+import "Keyframes.js" as Keyframes
 
 ApplicationWindow {
   id: win
   width: 1440; height: 900; minimumWidth: 1024; minimumHeight: 640
   visible: true
   title: "Omareel"
-  color: T.app
+  color: engine.theme.app
 
   // ---- state ----
   property var sources: []
@@ -26,6 +28,8 @@ ApplicationWindow {
   property int layersRev: 0
   function touchLayers() { layersRev = (layersRev + 1) % 2000000000 }
   property string srtPath: ""
+  property string subtitleMode: "normal" // normal = fixed SRT; reel = editable text layers
+  property string subtitleStatus: ""
   property real split: 0.5
   property bool editRegions: false   // zone/marco editing in Program (toggle from Inspector)
   property bool loop: false
@@ -34,6 +38,7 @@ ApplicationWindow {
   property real trimIn: 0
   property real trimOut: 1
   property int selectedLayer: -1
+  property string keyframeEasing: "easeInOut"
   property string view: "edit"   // "edit" | "out"
   property int tplIndex: 0
   property int regionX: 0
@@ -127,19 +132,42 @@ ApplicationWindow {
   // fresh copies on purpose: returning live refs means the RegionEditor/Output
   // bindings see "same value" on in-place edits and never refresh (split slider,
   // output divider, inspector spins must move the boxes live)
-  function activeBoxA() { var b = activeBlock(); if (b) return cpBox(b.layout === "apilar" ? b.regions.top : b.regions.main); return cpBox({ x: regionX, y: regionY, w: regionW, h: regionH }) }
-  function activeBoxB() { var b = activeBlock(); if (b) return cpBox(b.layout === "apilar" ? b.regions.bottom : b.regions.fg); return cpBox(activeLayout() === "apilar" ? apilarBottom : fgRegion) }
+  function regionAspect(lay, key, splitValue) {
+    if (lay === "apilar") {
+      var f = key === "A" ? splitValue : 1 - splitValue
+      return (9 / 16) / Math.max(0.15, Math.min(0.85, f))
+    }
+    if (key === "B") return 1 // PiP/round foreground output is square
+    return 9 / 16             // full vertical background/output
+  }
+  function fittedRegion(lay, key, box, splitValue) {
+    return Crop.fit(cpBox(box), regionAspect(lay, key, splitValue), srcW, srcH)
+  }
+  function activeBoxA() {
+    var b = activeBlock(), lay = activeLayout(), raw = b ? (lay === "apilar" ? b.regions.top : b.regions.main)
+                                                        : (lay === "apilar" ? apilarTop : { x: regionX, y: regionY, w: regionW, h: regionH })
+    return fittedRegion(lay, "A", raw, activeSplit())
+  }
+  function activeBoxB() {
+    var b = activeBlock(), lay = activeLayout(), raw = b ? (lay === "apilar" ? b.regions.bottom : b.regions.fg)
+                                                        : (lay === "apilar" ? apilarBottom : fgRegion)
+    return fittedRegion(lay, "B", raw, activeSplit())
+  }
   function setRegion(key, box) {
-    box = { x: Math.round(box.x * 10) / 10, y: Math.round(box.y * 10) / 10, w: Math.round(box.w * 10) / 10, h: Math.round(box.h * 10) / 10 }
+    box = fittedRegion(activeLayout(), key, box, activeSplit())
     var b = activeBlock()
     if (b) {
       var r = b.regions
-      if (b.layout === "apilar") { if (key === "A") r.top = box; else r.bottom = box }
+      if (b.layout === "apilar") {
+        if (key === "A") r.top = box; else r.bottom = box
+      }
       else { if (key === "A") r.main = box; else r.fg = box }
       b.regions = r
-      var cp = blocks.slice(); cp[selectedBlock] = b; blocks = cp
+      var cp = blocks.slice(); cp[selectedBlock] = b; blocks = cp; blocksRev = (blocksRev + 1) % 2000000000
     } else {
-      if (activeLayout() === "apilar") { if (key === "A") apilarTop = box; else apilarBottom = box }
+      if (activeLayout() === "apilar") {
+        if (key === "A") apilarTop = box; else apilarBottom = box
+      }
       else if (key === "A") { regionX = box.x; regionY = box.y; regionW = box.w; regionH = box.h }
       else fgRegion = box
     }
@@ -147,8 +175,12 @@ ApplicationWindow {
   function setSplit(f) {
     f = Math.max(0.15, Math.min(0.85, f))
     var b = activeBlock()
-    if (b) { b.split = f; var cp = blocks.slice(); cp[selectedBlock] = b; blocks = cp }
-    else split = f
+    if (b) {
+      b.split = f
+      var cp = blocks.slice(); cp[selectedBlock] = b; blocks = cp; blocksRev = (blocksRev + 1) % 2000000000
+    } else {
+      split = f
+    }
   }
   function activeSplit() { var b = activeBlock(); return b ? (b.split || 0.5) : split }
   function mkBlock(st, en, lay) {
@@ -288,10 +320,20 @@ ApplicationWindow {
 
   // ---------- project.json (AI-editable, live-reloaded) ----------
   property string lastSavedStr: ""
-  function projectDoc() {
+  property var pathHints: ({})
+  function serializedPath(path) { return path && win.pathHints[path] ? win.pathHints[path] : (path || "") }
+  function serializedLayers(keepHints) {
+    return win.layers.map(function (layer) {
+      var copy = Object.assign({}, layer)
+      if (keepHints && copy.path) copy.path = win.serializedPath(copy.path)
+      return copy
+    })
+  }
+  function projectDoc(keepHints) {
+    if (keepHints === undefined) keepHints = true
     return {
       version: 1, app: "omareel",
-      video: win.current ? win.current.path : "",
+      video: win.current ? (keepHints ? win.serializedPath(win.current.path) : win.current.path) : "",
       trim: { "in": Math.round(win.trimIn * 100) / 100, out: Math.round(win.trimOut * 100) / 100 },
       template: win.layoutName(),
       region: { x: win.regionX, y: win.regionY, w: win.regionW, h: win.regionH },
@@ -299,9 +341,9 @@ ApplicationWindow {
       editRegions: win.editRegions,
       apilar: { top: win.apilarTop, bottom: win.apilarBottom, split: Math.round(win.split * 1000) / 1000 },
       pip: { fg: win.fgRegion, fx: win.pipFx, fy: win.pipFy },
-      layers: win.layers,
+      layers: win.serializedLayers(keepHints),
       blocks: win.blocks,
-      srt: win.srtPath,
+      srt: keepHints ? win.serializedPath(win.srtPath) : win.srtPath,
       render: { formats: (win.fmtV ? ["v"] : []).concat(win.fmtH ? ["h"] : []),
                 codec: ["h264", "h265", "vp9"][win.renderCodecIdx],
                 quality: ["high", "med", "low"][win.renderQualIdx] },
@@ -310,6 +352,7 @@ ApplicationWindow {
   }
   function applyProject(d) {
     if (!d || !d.version) return
+    win.pathHints = d._pathHints || ({})
     if (d.trim) { win.trimIn = d.trim["in"] || 0; win.trimOut = d.trim.out || 1e9 }
     if (d.template) win.tplIndex = d.template === "apilar" ? 1 : (d.template === "pip" ? 2 : (d.template === "circulo" ? 3 : 0))
     if (d.region) { win.regionX = d.region.x; win.regionY = d.region.y; win.regionW = d.region.w; win.regionH = d.region.h }
@@ -342,8 +385,16 @@ ApplicationWindow {
       win.normalizeFr()
     }
     if (d.video && (!win.current || win.current.path !== d.video)) {
+      var foundVideo = false
       for (var i = 0; i < win.sources.length; i++)
-        if (win.sources[i].path === d.video) { win.current = win.sources[i]; win.cutPath = ""; loadVideo(d.video); break }
+        if (win.sources[i].path === d.video) { win.current = win.sources[i]; foundVideo = true; break }
+      if (!foundVideo) {
+        var probe = engine.probeVideo(d.video)
+        win.current = { id: d.video, path: d.video, title: d.video.split("/").pop(),
+                        duration: probe.duration || 0, width: probe.width || 0, height: probe.height || 0 }
+      }
+      win.cutPath = ""
+      loadVideo(d.video)
     }
   }
   Timer {
@@ -352,7 +403,7 @@ ApplicationWindow {
       if (!win.current || win.view !== "edit") return
       var doc = win.projectDoc()
       var str = JSON.stringify(doc)
-      if (str !== win.lastSavedStr) { win.lastSavedStr = str; engine.saveProject(doc) }
+      if (str !== win.lastSavedStr && engine.saveProject(doc)) win.lastSavedStr = str
     }
   }
 
@@ -360,8 +411,8 @@ ApplicationWindow {
   Connections {
     target: engine
     function onProjectChangedExternally(doc) {
-      win.lastSavedStr = JSON.stringify(doc)   // avoid immediate re-save loop
       win.applyProject(doc)
+      win.lastSavedStr = JSON.stringify(win.projectDoc()) // avoid immediate re-save loop
     }
   }
 
@@ -407,23 +458,67 @@ ApplicationWindow {
 
   function patchLayer(i, patch) {
     var l = win.layers
-    if (!l[i]) return
-    if (patch.x !== undefined) l[i].x = Math.max(0, Math.min(1, patch.x))
-    if (patch.y !== undefined) l[i].y = Math.max(0, Math.min(1, patch.y))
-    // program/source-space coords (dual-format editing)
-    if (patch.px !== undefined) l[i].px = Math.max(0, Math.min(1, patch.px))
-    if (patch.py !== undefined) l[i].py = Math.max(0, Math.min(1, patch.py))
-    if (patch.pw !== undefined) l[i].pw = Math.max(0, Math.min(1, patch.pw))
-    if (patch.ph !== undefined) l[i].ph = Math.max(0, Math.min(1, patch.ph))
-    if (patch.shape !== undefined) l[i].shape = patch.shape
+    var layer = l[i]
+    if (!layer) return
+    var keys = ["x", "y", "w", "h", "px", "py", "pw", "ph", "size", "opacity"]
+    var animatedPatch = false
+    for (var p = 0; p < keys.length; p++) animatedPatch = animatedPatch || patch[keys[p]] !== undefined
+    var frames = Array.isArray(layer.keyframes) ? layer.keyframes.slice() : []
+    if (frames.length && animatedPatch) {
+      // Auto-keyframe edits at the current playhead once animation exists. Start
+      // from the interpolated state so dragging a second pose cannot snap back
+      // to the first keyframe before the explicit diamond button is pressed.
+      var time = Math.round((win.playerRef ? win.playerRef.position / 1000 : 0) * 1000) / 1000
+      layer.keyframes = Keyframes.patchedFrames(layer, patch, time, win.keyframeEasing)
+    } else {
+      for (var name2 in patch) {
+        if (keys.indexOf(name2) >= 0 && name2 !== "size") layer[name2] = Math.max(0, Math.min(1, patch[name2]))
+        else layer[name2] = patch[name2]
+      }
+    }
+    // Non-animated metadata such as shape always lives on the layer itself.
+    for (var name3 in patch) if (keys.indexOf(name3) < 0) layer[name3] = patch[name3]
     win.touchLayers()
+  }
+  function keyframeAt(i, time) {
+    var layer = win.layers[i]
+    if (!layer) return
+    // Store only animatable/persisted values. This JSON stays simple for manual
+    // or LLM editing and is evaluated identically by both previews.
+    var frame = { time: Math.round(time * 1000) / 1000, easing: win.keyframeEasing }
+    var evaluated = Keyframes.at(layer, time)
+    var keys = ["x", "y", "w", "h", "px", "py", "pw", "ph", "size", "opacity"]
+    for (var k = 0; k < keys.length; k++)
+      if (evaluated[keys[k]] !== undefined) frame[keys[k]] = evaluated[keys[k]]
+    var frames = Array.isArray(layer.keyframes) ? layer.keyframes.slice() : []
+    var found = -1
+    for (var j = 0; j < frames.length; j++)
+      if (Math.abs(frames[j].time - frame.time) < 0.001) { found = j; break }
+    if (found >= 0) frames[found] = Object.assign({}, frames[found], frame)
+    else frames.push(frame)
+    frames.sort(function (a, b) { return a.time - b.time })
+    layer.keyframes = frames
+    win.touchLayers()
+  }
+  function hasKeyframeAt(i, time) {
+    var l = win.layers[i], frames = l && Array.isArray(l.keyframes) ? l.keyframes : []
+    for (var j = 0; j < frames.length; j++) if (Math.abs(frames[j].time - time) < 0.001) return true
+    return false
+  }
+  function applyGeneratedSubtitles(path) {
+    if (win.subtitleMode === "normal") { win.srtPath = path; win.subtitleStatus = win.tt("subtitleReady"); return }
+    var keep = win.layers.filter(function (layer) { return !layer.subtitle })
+    win.layers = keep.concat(engine.subtitleLayers(path, true))
+    win.selectedLayer = keep.length < win.layers.length ? keep.length : -1
+    win.touchLayers()
+    win.subtitleStatus = win.tt("subtitleReady")
   }
   function addLayer(type, path) {
     var l = win.layers.slice()
     if (type === "text")
-      l.push({ type: "text", text: "", x: 0.5, y: 0.15, size: 90, color: "#ffffff", font: "", inS: win.trimIn, outS: win.trimOut })
+      l.push({ type: "text", text: "", x: 0.5, y: 0.15, size: 90, opacity: 1, fadeIn: 0, fadeOut: 0, color: "#ffffff", font: "", inS: win.trimIn, outS: win.trimOut })
     else
-      l.push({ type: type, path: path || "", text: "", x: 0.5, y: 0.5, w: 0.35, h: 0.20, size: 90, color: "#ffffff", font: "", inS: win.trimIn, outS: win.trimOut })
+      l.push({ type: type, path: path || "", text: "", x: 0.5, y: 0.5, w: 0.35, h: 0.20, size: 90, opacity: 1, fadeIn: 0, fadeOut: 0, color: "#ffffff", font: "", inS: win.trimIn, outS: win.trimOut })
     win.layers = l
     win.selectedLayer = l.length - 1
   }
@@ -433,7 +528,7 @@ ApplicationWindow {
     refreshSources(); refreshOutputs()
     if (sources.length > 0) { win.current = sources[0]; loadVideo(sources[0].path) }
     var proj = engine.loadProject()
-    if (proj && proj.version) { lastSavedStr = JSON.stringify(proj); applyProject(proj) }
+    if (proj && proj.version) { applyProject(proj); lastSavedStr = JSON.stringify(win.projectDoc()) }
     if (typeof uitest !== "undefined" && uitest) uitestTimer.restart()
   }
 
@@ -545,7 +640,9 @@ ApplicationWindow {
       for (var i = 0; i < j.length; i++) if (j[i].id === jobId) { j[i].status = "error"; j[i].error = message; found = true }
       if (!found) j.push({ id: jobId, status: "error", pct: 0, error: message })
       jobs = j
+      if (jobId === "subtitles") win.subtitleStatus = message
     }
+    function onSubtitlesReady(path) { win.applyGeneratedSubtitles(path) }
   }
 
   // Pause that keeps the current frame on screen. Qt Multimedia + GStreamer
@@ -575,11 +672,11 @@ ApplicationWindow {
     property bool active: false
     property bool accentBtn: false
     signal clicked()
-    width: lbl.implicitWidth + 18; height: 28; radius: T.radius
-    color: accentBtn ? T.accent : (active ? T.accentSoft : (ma.containsMouse ? "#2b3050" : T.panelAlt))
-    border.color: accentBtn ? T.accent : (active ? T.accent : T.border)
-    Label { id: lbl; anchors.centerIn: parent; text: parent.text; color: accentBtn ? "#16161e" : T.text; font.pixelSize: 11; font.bold: accentBtn }
-    MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; onClicked: parent.clicked(); ToolTip.text: parent.tip; ToolTip.visible: hovered && parent.tip !== ""; ToolTip.delay: 500 }
+    width: lbl.implicitWidth + 18; height: 28; radius: engine.theme.radius
+    color: accentBtn ? engine.theme.accent : (active ? engine.theme.accentSoft : (ma.containsMouse ? "#2b3050" : engine.theme.panelAlt))
+    border.color: accentBtn ? engine.theme.accent : (active ? engine.theme.accent : engine.theme.border)
+    Label { id: lbl; anchors.centerIn: parent; text: parent.text; color: accentBtn ? "#16161e" : engine.theme.text; font.pixelSize: 11; font.bold: accentBtn }
+    MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; onClicked: parent.clicked(); ToolTip.text: parent.tip; ToolTip.visible: containsMouse && parent.tip !== ""; ToolTip.delay: 500 }
   }
   component IconBtn: Rectangle {
     property string glyph: ""
@@ -587,10 +684,10 @@ ApplicationWindow {
     property bool active: false
     signal clicked()
     width: 30; height: 30; radius: 15
-    color: active ? T.accentSoft : (ma2.containsMouse ? "#2b3050" : "transparent")
-    border.color: active ? T.accent : "transparent"
-    Label { anchors.centerIn: parent; text: parent.glyph; color: parent.active ? T.accent : T.text; font.pixelSize: 13 }
-    MouseArea { id: ma2; anchors.fill: parent; hoverEnabled: true; onClicked: parent.clicked(); ToolTip.text: parent.tip; ToolTip.visible: hovered && parent.tip !== ""; ToolTip.delay: 400 }
+    color: active ? engine.theme.accentSoft : (ma2.containsMouse ? "#2b3050" : "transparent")
+    border.color: active ? engine.theme.accent : "transparent"
+    Label { anchors.centerIn: parent; text: parent.glyph; color: parent.active ? engine.theme.accent : engine.theme.text; font.pixelSize: 13 }
+    MouseArea { id: ma2; anchors.fill: parent; hoverEnabled: true; onClicked: parent.clicked(); ToolTip.text: parent.tip; ToolTip.visible: containsMouse && parent.tip !== ""; ToolTip.delay: 400 }
   }
 
   // ---------- panel content components ----------
@@ -607,9 +704,9 @@ ApplicationWindow {
       model: win.sources; spacing: 6; clip: true
       delegate: Rectangle {
         required property var modelData
-        width: ListView.view.width; height: 58; radius: T.radius
-        color: win.current && win.current.path === modelData.path ? T.accentSoft : (hov.containsMouse ? "#272c42" : T.panelAlt)
-        border.color: win.current && win.current.path === modelData.path ? T.accent : T.borderSoft
+        width: ListView.view.width; height: 58; radius: engine.theme.radius
+        color: win.current && win.current.path === modelData.path ? engine.theme.accentSoft : (hov.containsMouse ? "#272c42" : engine.theme.panelAlt)
+        border.color: win.current && win.current.path === modelData.path ? engine.theme.accent : engine.theme.borderSoft
         RowLayout {
           anchors.fill: parent; anchors.margins: 6; spacing: 8
           Image {
@@ -618,13 +715,13 @@ ApplicationWindow {
             Rectangle { anchors.fill: parent; color: "#000"; visible: parent.status !== Image.Ready; radius: 3 }
           }
           ColumnLayout { Layout.fillWidth: true; spacing: 2
-            Label { text: modelData.title; color: T.text; elide: Label.ElideRight; Layout.fillWidth: true; font.pixelSize: 10 }
-            Label { text: win.fmtDur(modelData.duration) + " · " + win.fmtSize(modelData.size); color: T.textMuted; font.pixelSize: 9; font.family: T.fontMono }
+            Label { text: modelData.title; color: engine.theme.text; elide: Label.ElideRight; Layout.fillWidth: true; font.pixelSize: 10 }
+            Label { text: win.fmtDur(modelData.duration) + " · " + win.fmtSize(modelData.size); color: engine.theme.textMuted; font.pixelSize: 9; font.family: engine.theme.fontMono }
           }
         }
         MouseArea { id: hov; anchors.fill: parent; hoverEnabled: true; onClicked: { win.current = modelData; win.cutPath = ""; loadVideo(modelData.path) } }
       }
-      Label { visible: win.sources.length === 0; text: win.tt("noSources"); color: T.textDim; wrapMode: Text.WordWrap; width: parent ? parent.width - 16 : 200 }
+      Label { visible: win.sources.length === 0; text: win.tt("noSources"); color: engine.theme.textDim; wrapMode: Text.WordWrap; width: parent ? parent.width - 16 : 200 }
     }
   }
 
@@ -634,9 +731,9 @@ ApplicationWindow {
     Component.onDestruction: if (win.playerRef === player) win.playerRef = null
     Rectangle {
       Layout.fillWidth: true; Layout.fillHeight: true; color: "#000"; radius: 4; clip: true
-      border.color: T.borderSoft
+      border.color: engine.theme.borderSoft
       VideoOutput { id: videoOut; anchors.fill: parent }
-      Label { anchors.centerIn: parent; visible: !player.source.toString(); text: win.tt("preview"); color: T.textDim }
+      Label { anchors.centerIn: parent; visible: !player.source.toString(); text: win.tt("preview"); color: engine.theme.textDim }
       MediaPlayer { id: player; videoOutput: videoOut }
       OverlayLayers {
         // pinned to the video frame: program-space fractions map to source pixels
@@ -658,8 +755,15 @@ ApplicationWindow {
         x: videoOut.contentRect.x; y: videoOut.contentRect.y
         width: videoOut.contentRect.width; height: videoOut.contentRect.height
         visible: videoOut.contentRect.width > 4 && videoOut.contentRect.height > 4 && win.editRegions
+        // Every source sector painted in OUTPUT is represented here. In PiP and
+        // Circle these are MAIN + PIP/CIRCLE; in Apilar they are TOP + BOT.
         mode: win.activeLayout() === "completa" ? 0 : 1
-        showSplit: win.activeLayout() === "apilar"
+        boxALabel: win.activeLayout() === "apilar" ? "TOP" : "MAIN"
+        boxBLabel: win.activeLayout() === "apilar" ? "BOT" : (win.activeLayout() === "circulo" ? "CIRCLE" : "PIP")
+        aspectA: win.regionAspect(win.activeLayout(), "A", win.activeSplit())
+        aspectB: win.regionAspect(win.activeLayout(), "B", win.activeSplit())
+        // The apilar divider belongs to the 9:16 output canvas, not source-space PROGRAM.
+        showSplit: false
         boxA: win.activeBoxA()
         boxB: win.activeBoxB()
         splitFrac: win.activeSplit()
@@ -671,21 +775,21 @@ ApplicationWindow {
       }
       Rectangle {
         visible: win.loop; anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 10
-        width: loopLbl.width + 16; height: 22; radius: 11; color: T.accent
+        width: loopLbl.width + 16; height: 22; radius: 11; color: engine.theme.accent
         Label { id: loopLbl; anchors.centerIn: parent; text: "A-B LOOP"; color: "#16161e"; font.pixelSize: 9; font.bold: true }
       }
     }
     Rectangle {
-      Layout.fillWidth: true; height: 40; color: T.panelAlt; radius: T.radius; border.color: T.borderSoft
+      Layout.fillWidth: true; height: 40; color: engine.theme.panelAlt; radius: engine.theme.radius; border.color: engine.theme.borderSoft
       RowLayout {
         anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 10; spacing: 2
         IconBtn { glyph: "⏮"; tip: "Inicio"; onClicked: player.position = Math.round(win.trimIn * 1000) }
         IconBtn { glyph: "◂"; tip: "Frame -1 (←)"; onClicked: { player.pause(); player.position = Math.max(0, player.position - 33) } }
         Rectangle {
           width: 36; height: 36; radius: 18
-          color: player.playbackState === MediaPlayer.PlayingState ? T.panel : T.play
-          border.color: player.playbackState === MediaPlayer.PlayingState ? T.border : T.play
-          Label { anchors.centerIn: parent; text: player.playbackState === MediaPlayer.PlayingState ? "⏸" : "▶"; color: player.playbackState === MediaPlayer.PlayingState ? T.text : "#16161e"; font.pixelSize: 15 }
+          color: player.playbackState === MediaPlayer.PlayingState ? engine.theme.panel : engine.theme.play
+          border.color: player.playbackState === MediaPlayer.PlayingState ? engine.theme.border : engine.theme.play
+          Label { anchors.centerIn: parent; text: player.playbackState === MediaPlayer.PlayingState ? "⏸" : "▶"; color: player.playbackState === MediaPlayer.PlayingState ? engine.theme.text : "#16161e"; font.pixelSize: 15 }
           MouseArea { anchors.fill: parent; onClicked: {
             if (player.playbackState === MediaPlayer.PlayingState) win.pausePlayback()
             else { if (player.position >= player.duration - 50) player.position = Math.round(win.trimIn * 1000); player.play() }
@@ -693,14 +797,14 @@ ApplicationWindow {
         }
         IconBtn { glyph: "▸"; tip: "Frame +1 (→)"; onClicked: { player.pause(); player.position = Math.min(player.duration, player.position + 33) } }
         IconBtn { glyph: "⏭"; tip: "Fin"; onClicked: player.position = Math.round(win.trimOut * 1000) }
-        Rectangle { width: 1; height: 18; color: T.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
+        Rectangle { width: 1; height: 18; color: engine.theme.border; Layout.leftMargin: 6; Layout.rightMargin: 6 }
         IconBtn { glyph: "🔁"; tip: "Loop A-B (L)"; active: win.loop; onClicked: win.loop = !win.loop }
         Item { Layout.fillWidth: true }
         Rectangle {
-          height: 26; width: tc.width + 20; radius: 4; color: "#101116"; border.color: T.border
-          Label { id: tc; anchors.centerIn: parent; text: win.fmtTc(player.position / 1000); color: T.good; font.pixelSize: 13; font.family: T.fontMono }
+          height: 26; width: tc.width + 20; radius: 4; color: "#101116"; border.color: engine.theme.border
+          Label { id: tc; anchors.centerIn: parent; text: win.fmtTc(player.position / 1000); color: engine.theme.good; font.pixelSize: 13; font.family: engine.theme.fontMono }
         }
-        Label { text: "/ " + win.fmtTc(durS()); color: T.textMuted; font.pixelSize: 11; font.family: T.fontMono }
+        Label { text: "/ " + win.fmtTc(durS()); color: engine.theme.textMuted; font.pixelSize: 11; font.family: engine.theme.fontMono }
         Item { Layout.fillWidth: true }
         NleButton { text: "⟨ I"; tip: "Marcar entrada (I)"; onClicked: win.trimIn = player.position / 1000 }
         NleButton { text: "O ⟩"; tip: "Marcar salida (O)"; onClicked: win.trimOut = player.position / 1000 }
@@ -723,13 +827,18 @@ ApplicationWindow {
     FileDialog { id: gifDialog; fileMode: FileDialog.OpenFile; nameFilters: ["GIF (*.gif *.webp)"]; onAccepted: win.addLayer("gif", String(selectedFile).replace("file://", "")) }
     FileDialog { id: imgDialog; fileMode: FileDialog.OpenFile; nameFilters: ["Image (*.png *.jpg *.jpeg *.webp)"]; onAccepted: win.addLayer("image", String(selectedFile).replace("file://", "")) }
     RowLayout { Layout.fillWidth: true
-      Label { text: win.tt("subtitles") + ":"; color: T.textMuted; font.pixelSize: 10 }
-      Label { text: win.srtPath ? win.srtPath.split("/").pop() : win.tt("noSrt"); color: T.text; elide: Label.ElideMiddle; Layout.fillWidth: true; font.pixelSize: 10 }
+      Label { text: win.tt("subtitles") + ":"; color: engine.theme.textMuted; font.pixelSize: 10 }
+      Label { text: win.srtPath ? win.srtPath.split("/").pop() : win.tt("noSrt"); color: engine.theme.text; elide: Label.ElideMiddle; Layout.fillWidth: true; font.pixelSize: 10 }
       NleButton { text: "…"; onClicked: srtDialog.open() }
     }
+    RowLayout { Layout.fillWidth: true; spacing: 5
+      FnCombo { Layout.fillWidth: true; model: [win.tt("subtitleNormal"), win.tt("subtitleReel")]; currentIndex: win.subtitleMode === "reel" ? 1 : 0; onActivated: win.subtitleMode = currentIndex === 1 ? "reel" : "normal" }
+      NleButton { text: "🎤 " + win.tt("subtitleGenerate"); enabled: win.renderSource() !== ""; onClicked: { win.subtitleStatus = win.tt("subtitleWorking"); engine.transcribeAudio(win.renderSource(), engine.language) } }
+    }
+    Label { visible: win.subtitleStatus !== ""; text: win.subtitleStatus; color: engine.theme.textMuted; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 9 }
     FileDialog { id: srtDialog; fileMode: FileDialog.OpenFile; nameFilters: ["Subtitles (*.srt *.vtt)"]; onAccepted: win.srtPath = String(selectedFile).replace("file://", "") }
 
-    Rectangle { Layout.fillWidth: true; height: 1; color: T.border }
+    Rectangle { Layout.fillWidth: true; height: 1; color: engine.theme.border }
 
     // layer cards (reorderable)
     ListView {
@@ -743,15 +852,19 @@ ApplicationWindow {
         required property int index
         required property var modelData
         property var cardLayer: modelData
+        readonly property var animatedLayer: {
+          win.layersRev
+          return Keyframes.at(cardLayer, win.playerRef ? win.playerRef.position / 1000 : 0)
+        }
         property int idx: index
-        width: ListView.view.width; height: cardCol.implicitHeight + 12; radius: T.radius
-        color: win.selectedLayer === index ? "#26332a" : T.panelAlt
-        border.color: win.selectedLayer === index ? T.good : T.borderSoft
+        width: ListView.view.width; height: cardCol.implicitHeight + 12; radius: engine.theme.radius
+        color: win.selectedLayer === index ? "#26332a" : engine.theme.panelAlt
+        border.color: win.selectedLayer === index ? engine.theme.good : engine.theme.borderSoft
         ColumnLayout {
           id: cardCol; anchors.fill: parent; anchors.margins: 6; spacing: 4
           RowLayout { Layout.fillWidth: true
             Label {
-              text: "≡"; color: T.textDim; font.pixelSize: 13
+              text: "≡"; color: engine.theme.textDim; font.pixelSize: 13
               MouseArea {
                 anchors.fill: parent; cursorShape: Qt.SizeVerCursor
                 preventStealing: true
@@ -772,10 +885,10 @@ ApplicationWindow {
             }
             Label {
               text: modelData.type === "text" ? "🅣" : (modelData.type === "gif" ? "GIF" : (modelData.type === "video" ? "🎬" : "🖼"))
-              color: modelData.type === "video" ? T.orange : T.magenta; font.pixelSize: 10; font.bold: true
+              color: modelData.type === "video" ? engine.theme.orange : engine.theme.magenta; font.pixelSize: 10; font.bold: true
             }
             Label {
-              Layout.fillWidth: true; elide: Label.ElideMiddle; font.pixelSize: 10; color: T.text
+              Layout.fillWidth: true; elide: Label.ElideMiddle; font.pixelSize: 10; color: engine.theme.text
               text: {
                 win.layersRev
                 var l = win.layers[index]
@@ -800,33 +913,57 @@ ApplicationWindow {
             onActiveFocusChanged: if (activeFocus) win.selectedLayer = index
           }
           RowLayout { visible: card.expanded; Layout.fillWidth: true
-            Label { text: modelData.type === "text" ? win.tt("fontSize") : "w%"; color: T.textDim; font.pixelSize: 10 }
+            Label { text: modelData.type === "text" ? win.tt("fontSize") : "w%"; color: engine.theme.textDim; font.pixelSize: 10 }
             FnSpin {
               from: modelData.type === "text" ? 20 : 5; to: modelData.type === "text" ? 300 : 100
-              value: modelData.type === "text" ? modelData.size : Math.round((modelData.w || 0.35) * 100)
-              onValueChanged: { if (modelData.type === "text") win.layers[index].size = value; else { win.layers[index].w = value / 100; win.layers[index].h = value / 100 * 0.56 } win.touchLayers() }
+              value: modelData.type === "text" ? card.animatedLayer.size : Math.round((card.animatedLayer.w || 0.35) * 100)
+              onValueModified: if (modelData.type === "text") win.patchLayer(index, { size: value }); else win.patchLayer(index, { w: value / 100, h: value / 100 * 0.56 })
             }
-            Label { text: "y%"; color: T.textDim; font.pixelSize: 10 }
-            FnSpin { from: 5; to: 95; value: Math.round(modelData.y * 100); onValueChanged: { win.layers[index].y = value / 100; win.touchLayers() } }
+            Label { text: "y%"; color: engine.theme.textDim; font.pixelSize: 10 }
+            FnSpin { from: 5; to: 95; value: Math.round(card.animatedLayer.y * 100); onValueModified: win.patchLayer(index, { y: value / 100 }) }
+          }
+          RowLayout { visible: card.expanded; Layout.fillWidth: true; spacing: 4
+            Label { text: "Opacity %"; color: engine.theme.textDim; font.pixelSize: 9 }
+            FnSpin { from: 0; to: 100; value: Math.round((card.animatedLayer.opacity === undefined ? 1 : card.animatedLayer.opacity) * 100); onValueModified: win.patchLayer(index, { opacity: value / 100 }) }
+            Label { text: "Fade I/O ×0.1s"; color: engine.theme.textDim; font.pixelSize: 9 }
+            FnSpin { from: 0; to: 100; value: Math.round((modelData.fadeIn || 0) * 10); onValueModified: win.patchLayer(index, { fadeIn: value / 10 }) }
+            FnSpin { from: 0; to: 100; value: Math.round((modelData.fadeOut || 0) * 10); onValueModified: win.patchLayer(index, { fadeOut: value / 10 }) }
           }
           RowLayout {
             visible: card.expanded && card.cardLayer.type === "video"; Layout.fillWidth: true; spacing: 4
-            Label { text: "forma"; color: T.textDim; font.pixelSize: 10 }
+            Label { text: "forma"; color: engine.theme.textDim; font.pixelSize: 10 }
             Repeater {
               model: [["rect", "▢"], ["rounded", "⬒"], ["circle", "◯"]]
               delegate: Rectangle {
                 required property var modelData
                 property string shp: modelData[0]
                 width: 26; height: 22; radius: 4
-                color: (card.cardLayer.shape || "rect") === shp ? T.accentSoft : T.panelDeep
-                border.color: (card.cardLayer.shape || "rect") === shp ? T.accent : T.border
-                Label { anchors.centerIn: parent; text: modelData[1]; color: (card.cardLayer.shape || "rect") === shp ? T.accent : T.textMuted; font.pixelSize: 12 }
+                color: (card.cardLayer.shape || "rect") === shp ? engine.theme.accentSoft : engine.theme.panelDeep
+                border.color: (card.cardLayer.shape || "rect") === shp ? engine.theme.accent : engine.theme.border
+                Label { anchors.centerIn: parent; text: modelData[1]; color: (card.cardLayer.shape || "rect") === shp ? engine.theme.accent : engine.theme.textMuted; font.pixelSize: 12 }
                 MouseArea { anchors.fill: parent; onClicked: win.patchLayer(card.idx, { shape: shp }) }
               }
             }
             Item { Layout.fillWidth: true }
           }
-          Label { visible: card.expanded; text: "⏱ " + win.fmtTc(modelData.inS) + " → " + win.fmtTc(modelData.outS); color: T.textMuted; font.pixelSize: 9; font.family: T.fontMono }
+          RowLayout {
+            visible: card.expanded; Layout.fillWidth: true; spacing: 5
+            property real keyTime: win.playerRef ? win.playerRef.position / 1000 : 0
+            NleButton {
+              text: win.hasKeyframeAt(index, parent.keyTime) ? "◆ " + win.tt("keyframe") : "◇ " + win.tt("keyframe")
+              Layout.fillWidth: true
+              tip: win.tt("keyframeTip")
+              accentBtn: win.hasKeyframeAt(index, parent.keyTime)
+              onClicked: win.keyframeAt(index, parent.keyTime)
+            }
+            FnCombo {
+              Layout.preferredWidth: 104
+              model: ["linear", "easeIn", "easeOut", "easeInOut", "backOut", "bounce"]
+              currentIndex: model.indexOf(win.keyframeEasing)
+              onActivated: win.keyframeEasing = model[currentIndex]
+            }
+          }
+          Label { visible: card.expanded; text: "⏱ " + win.fmtTc(modelData.inS) + " → " + win.fmtTc(modelData.outS); color: engine.theme.textMuted; font.pixelSize: 9; font.family: engine.theme.fontMono }
         }
         // click anywhere on the card focuses the layer (kept below child controls)
         MouseArea {
@@ -841,7 +978,7 @@ ApplicationWindow {
             layerList.positionViewAtIndex(win.selectedLayer, ListView.Contain)
         }
       }
-      Label { anchors.centerIn: parent; visible: win.layers.length === 0; text: "+"; color: T.textDim; font.pixelSize: 24 }
+      Label { anchors.centerIn: parent; visible: win.layers.length === 0; text: "+"; color: engine.theme.textDim; font.pixelSize: 24 }
     }
   }
 
@@ -849,31 +986,31 @@ ApplicationWindow {
     spacing: 8
     property var codecNames: ["H.264 (MP4)", "H.265 / HEVC (MP4)", "VP9 (MP4)"]
     property var qualNames: [win.tt("qualHigh"), win.tt("qualMed"), win.tt("qualLow")]
-    Label { text: win.tt("renderFormats").toUpperCase(); color: T.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1 }
-    Rectangle { Layout.fillWidth: true; height: 28; radius: T.radius; color: T.panelDeep; border.color: T.border
+    Label { text: win.tt("renderFormats").toUpperCase(); color: engine.theme.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1 }
+    Rectangle { Layout.fillWidth: true; height: 28; radius: engine.theme.radius; color: engine.theme.panelDeep; border.color: engine.theme.border
       RowLayout { anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8; spacing: 8
-        Rectangle { width: 16; height: 16; radius: 4; border.color: T.border; color: win.fmtV ? T.accent : T.panelDeep
+        Rectangle { width: 16; height: 16; radius: 4; border.color: engine.theme.border; color: win.fmtV ? engine.theme.accent : engine.theme.panelDeep
           Label { anchors.centerIn: parent; text: "✓"; color: "#16161e"; font.pixelSize: 10; visible: win.fmtV }
           MouseArea { anchors.fill: parent; onClicked: win.fmtV = !win.fmtV } }
-        Label { text: win.tt("fmtVertical"); color: T.text; font.pixelSize: 11; Layout.fillWidth: true; elide: Label.ElideRight }
-        Label { text: "OUT"; color: T.textMuted; font.pixelSize: 9; font.family: T.fontMono }
+        Label { text: win.tt("fmtVertical"); color: engine.theme.text; font.pixelSize: 11; Layout.fillWidth: true; elide: Label.ElideRight }
+        Label { text: "OUT"; color: engine.theme.textMuted; font.pixelSize: 9; font.family: engine.theme.fontMono }
       }
     }
-    Rectangle { Layout.fillWidth: true; height: 28; radius: T.radius; color: T.panelDeep; border.color: T.border
+    Rectangle { Layout.fillWidth: true; height: 28; radius: engine.theme.radius; color: engine.theme.panelDeep; border.color: engine.theme.border
       RowLayout { anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8; spacing: 8
-        Rectangle { width: 16; height: 16; radius: 4; border.color: T.border; color: win.fmtH ? T.accent : T.panelDeep
+        Rectangle { width: 16; height: 16; radius: 4; border.color: engine.theme.border; color: win.fmtH ? engine.theme.accent : engine.theme.panelDeep
           Label { anchors.centerIn: parent; text: "✓"; color: "#16161e"; font.pixelSize: 10; visible: win.fmtH }
           MouseArea { anchors.fill: parent; onClicked: win.fmtH = !win.fmtH } }
-        Label { text: win.tt("fmtHorizontal"); color: T.text; font.pixelSize: 11; Layout.fillWidth: true; elide: Label.ElideRight }
-        Label { text: "PROG"; color: T.textMuted; font.pixelSize: 9; font.family: T.fontMono }
+        Label { text: win.tt("fmtHorizontal"); color: engine.theme.text; font.pixelSize: 11; Layout.fillWidth: true; elide: Label.ElideRight }
+        Label { text: "PROG"; color: engine.theme.textMuted; font.pixelSize: 9; font.family: engine.theme.fontMono }
       }
     }
     RowLayout { Layout.fillWidth: true; spacing: 6
-      Label { text: win.tt("codec"); color: T.textDim; font.pixelSize: 10 }
+      Label { text: win.tt("codec"); color: engine.theme.textDim; font.pixelSize: 10 }
       FnCombo { Layout.fillWidth: true; model: codecNames; currentIndex: win.renderCodecIdx; onActivated: win.renderCodecIdx = currentIndex }
     }
     RowLayout { Layout.fillWidth: true; spacing: 6
-      Label { text: win.tt("qual"); color: T.textDim; font.pixelSize: 10 }
+      Label { text: win.tt("qual"); color: engine.theme.textDim; font.pixelSize: 10 }
       FnCombo { Layout.fillWidth: true; model: qualNames; currentIndex: win.renderQualIdx; onActivated: win.renderQualIdx = currentIndex }
     }
     NleButton {
@@ -882,19 +1019,19 @@ ApplicationWindow {
       accentBtn: win.renderSource() !== "" && (win.fmtV || win.fmtH)
       onClicked: win.startRender()
     }
-    Label { visible: win.renderSource() === ""; text: win.tt("needSource"); color: T.textDim; font.pixelSize: 10 }
-    Rectangle { Layout.fillWidth: true; height: 1; color: T.border }
+    Label { visible: win.renderSource() === ""; text: win.tt("needSource"); color: engine.theme.textDim; font.pixelSize: 10 }
+    Rectangle { Layout.fillWidth: true; height: 1; color: engine.theme.border }
     ColumnLayout { Layout.fillWidth: true; spacing: 4
-      Label { text: win.tt("jobs").toUpperCase() + "  (" + win.jobs.length + ")"; color: T.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1 }
+      Label { text: win.tt("jobs").toUpperCase() + "  (" + win.jobs.length + ")"; color: engine.theme.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1 }
       Repeater {
         model: win.jobs
         delegate: ColumnLayout {
           required property var modelData
           Layout.fillWidth: true; spacing: 2
           RowLayout { Layout.fillWidth: true
-            Label { text: modelData.id.slice(0, 8); color: T.text; font.pixelSize: 9; font.family: T.fontMono }
+            Label { text: modelData.id.slice(0, 8); color: engine.theme.text; font.pixelSize: 9; font.family: engine.theme.fontMono }
             Item { Layout.fillWidth: true }
-            Label { text: modelData.status === "done" ? win.tt("done") : (modelData.status === "error" ? win.tt("error") : win.tt("rendering")); color: modelData.status === "done" ? T.good : (modelData.status === "error" ? T.bad : T.warn); font.pixelSize: 9 }
+            Label { text: modelData.status === "done" ? win.tt("done") : (modelData.status === "error" ? win.tt("error") : win.tt("rendering")); color: modelData.status === "done" ? engine.theme.good : (modelData.status === "error" ? engine.theme.bad : engine.theme.warn); font.pixelSize: 9 }
           }
           ProgressBar { Layout.fillWidth: true; value: modelData.pct }
         }
@@ -906,16 +1043,16 @@ ApplicationWindow {
   component InspectorContent: ColumnLayout {
     spacing: 10
     ColumnLayout { Layout.fillWidth: true; spacing: 6
-      Label { text: "FORMATO"; color: T.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1 }
+      Label { text: "FORMATO"; color: engine.theme.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1 }
       Rectangle {
-        Layout.fillWidth: true; height: 30; radius: T.radius; color: T.panelDeep; border.color: T.border
-        Label { anchors.centerIn: parent; text: "Vertical 9:16 · 1080×1920"; color: T.text; font.pixelSize: 11 }
+        Layout.fillWidth: true; height: 30; radius: engine.theme.radius; color: engine.theme.panelDeep; border.color: engine.theme.border
+        Label { anchors.centerIn: parent; text: "Vertical 9:16 · 1080×1920"; color: engine.theme.text; font.pixelSize: 11 }
       }
-      Label { text: win.tt("template").toUpperCase(); color: T.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1 }
+      Label { text: win.tt("template").toUpperCase(); color: engine.theme.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1 }
       Label {
         visible: win.selectedBlock >= 0
         text: { var b = win.activeBlock(); return "BLOQUE " + (win.selectedBlock + 1) + " · " + win.fmtDur(b ? b.end - b.start : 0) }
-        color: T.orange; font.pixelSize: 9; font.bold: true
+        color: engine.theme.orange; font.pixelSize: 9; font.bold: true
       }
       FnCombo { Layout.fillWidth: true; model: [win.tt("tplCompleta"), win.tt("tplApilar"), "PiP", "Círculo"]
         currentIndex: { var l = win.activeLayout(); return l === "apilar" ? 1 : (l === "pip" ? 2 : (l === "circulo" ? 3 : 0)) }
@@ -928,7 +1065,7 @@ ApplicationWindow {
       }
       RowLayout {
         visible: win.activeLayout() === "pip" || win.activeLayout() === "circulo"; Layout.fillWidth: true
-        Label { text: "x/y"; color: T.textDim }
+        Label { text: "x/y"; color: engine.theme.textDim }
         Slider { Layout.fillWidth: true; from: 0; to: 1; value: { var b = win.activeBlock(); return b ? (b.fx || 0.5) : win.pipFx }
                  onMoved: { var b = win.activeBlock(); if (b) { b.fx = value; var cp = win.blocks.slice(); cp[win.selectedBlock] = b; win.blocks = cp } else win.pipFx = value } }
         Slider { Layout.fillWidth: true; from: 0; to: 1; value: { var b = win.activeBlock(); return b ? (b.fy || 0.72) : win.pipFy }
@@ -936,25 +1073,25 @@ ApplicationWindow {
       }
       GridLayout {
         visible: win.activeLayout() !== "apilar"; columns: 4; Layout.fillWidth: true
-        Label { text: "x"; color: T.textDim } FnSpin { from: 0; to: 100; value: win.regionX; onValueModified: win.regionX = value; Layout.fillWidth: true }
-        Label { text: "y"; color: T.textDim } FnSpin { from: 0; to: 100; value: win.regionY; onValueModified: win.regionY = value; Layout.fillWidth: true }
-        Label { text: "w"; color: T.textDim } FnSpin { from: 1; to: 100; value: win.regionW; onValueModified: win.regionW = value; Layout.fillWidth: true }
-        Label { text: "h"; color: T.textDim } FnSpin { from: 1; to: 100; value: win.regionH; onValueModified: win.regionH = value; Layout.fillWidth: true }
+        Label { text: "x"; color: engine.theme.textDim } FnSpin { from: 0; to: 100; value: win.regionX; onValueModified: win.regionX = value; Layout.fillWidth: true }
+        Label { text: "y"; color: engine.theme.textDim } FnSpin { from: 0; to: 100; value: win.regionY; onValueModified: win.regionY = value; Layout.fillWidth: true }
+        Label { text: "w"; color: engine.theme.textDim } FnSpin { from: 1; to: 100; value: win.regionW; onValueModified: win.regionW = value; Layout.fillWidth: true }
+        Label { text: "h"; color: engine.theme.textDim } FnSpin { from: 1; to: 100; value: win.regionH; onValueModified: win.regionH = value; Layout.fillWidth: true }
       }
       RowLayout {
         visible: win.activeLayout() !== "apilar"
         Rectangle {
-          width: 16; height: 16; radius: 4; border.color: T.border; color: win.lock916 ? T.accent : T.panelDeep
+          width: 16; height: 16; radius: 4; border.color: engine.theme.border; color: win.lock916 ? engine.theme.accent : engine.theme.panelDeep
           Label { anchors.centerIn: parent; text: "✓"; color: "#16161e"; font.pixelSize: 10; visible: win.lock916 }
           MouseArea { anchors.fill: parent; onClicked: win.lock916 = !win.lock916 }
         }
-        Label { text: "9:16"; color: T.textMuted; font.pixelSize: 10 }
+        Label { text: "9:16"; color: engine.theme.textMuted; font.pixelSize: 10 }
       }
       RowLayout {
         visible: win.activeLayout() === "apilar"; Layout.fillWidth: true
-        Label { text: win.tt("split"); color: T.textDim }
+        Label { text: win.tt("split"); color: engine.theme.textDim }
         Slider { Layout.fillWidth: true; from: 0.15; to: 0.85; value: win.activeSplit(); onValueChanged: win.setSplit(value) }
-        Label { text: Math.round(win.activeSplit() * 100) + "%"; color: T.textMuted; font.family: T.fontMono; font.pixelSize: 10 }
+        Label { text: Math.round(win.activeSplit() * 100) + "%"; color: engine.theme.textMuted; font.family: engine.theme.fontMono; font.pixelSize: 10 }
       }
     }
     Item { Layout.fillHeight: true }
@@ -990,8 +1127,8 @@ ApplicationWindow {
       cellWidth: 156; cellHeight: 260; clip: true
       delegate: Rectangle {
         required property var modelData
-        width: 146; height: 250; radius: T.radius
-        color: oh2.containsMouse ? "#272c42" : T.panelAlt; border.color: T.borderSoft
+        width: 146; height: 250; radius: engine.theme.radius
+        color: oh2.containsMouse ? "#272c42" : engine.theme.panelAlt; border.color: engine.theme.borderSoft
         ColumnLayout {
           anchors.fill: parent; anchors.margins: 8; spacing: 6
           Image {
@@ -999,8 +1136,8 @@ ApplicationWindow {
             source: modelData.thumb || ""; fillMode: Image.PreserveAspectCrop
             Rectangle { anchors.fill: parent; color: "#000"; visible: parent.status !== Image.Ready; radius: 3 }
           }
-          Label { text: modelData.name.slice(0, 14) + "…"; color: T.text; font.pixelSize: 10; font.family: T.fontMono; Layout.fillWidth: true }
-          Label { text: win.fmtSize(modelData.size); color: T.textMuted; font.pixelSize: 9; font.family: T.fontMono }
+          Label { text: modelData.name.slice(0, 14) + "…"; color: engine.theme.text; font.pixelSize: 10; font.family: engine.theme.fontMono; Layout.fillWidth: true }
+          Label { text: win.fmtSize(modelData.size); color: engine.theme.textMuted; font.pixelSize: 9; font.family: engine.theme.fontMono }
           RowLayout { Layout.fillWidth: true; spacing: 4
             IconBtn { glyph: "▶"; tip: win.tt("playOutput"); onClicked: { win.view = "edit"; loadVideo(modelData.path) } }
             IconBtn { glyph: "📂"; tip: win.tt("openFolder"); onClicked: engine.openFolder(modelData.path) }
@@ -1011,38 +1148,40 @@ ApplicationWindow {
         MouseArea { id: oh2; anchors.fill: parent; hoverEnabled: true; z: -1 }
       }
     }
-    Label { anchors.centerIn: parent; visible: win.outputs.length === 0; text: win.tt("noOutputs"); color: T.textDim }
+    Label { anchors.centerIn: parent; visible: win.outputs.length === 0; text: win.tt("noOutputs"); color: engine.theme.textDim }
   }
 
   // ---------- header ----------
   header: Rectangle {
-    height: 44; color: T.panelAlt
-    Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: T.border }
+    height: 44; color: engine.theme.panelAlt
+    Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: engine.theme.border }
     RowLayout {
       anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14
-      Label { text: "OMAREEL"; color: T.text; font.pixelSize: 14; font.bold: true; font.letterSpacing: 2 }
-      Rectangle { width: 1; height: 18; color: T.border }
-      Label { text: win.current ? win.current.title : ""; color: T.textMuted; font.pixelSize: 11; elide: Text.ElideMiddle; Layout.maximumWidth: 320 }
+      Label { text: "OMAREEL"; color: engine.theme.text; font.pixelSize: 14; font.bold: true; font.letterSpacing: 2 }
+      Rectangle { width: 1; height: 18; color: engine.theme.border }
+      Label { text: win.current ? win.current.title : ""; color: engine.theme.textMuted; font.pixelSize: 11; elide: Text.ElideMiddle; Layout.maximumWidth: 320 }
       Item { Layout.fillWidth: true }
       Row {
         spacing: 0
         Rectangle {
-          width: et1.width + 22; height: 28; radius: T.radius
-          color: win.view === "edit" ? T.accentSoft : "transparent"; border.color: win.view === "edit" ? T.accent : T.border
-          Label { id: et1; anchors.centerIn: parent; text: win.tt("viewEdit"); color: win.view === "edit" ? T.accent : T.textMuted; font.pixelSize: 11; font.bold: win.view === "edit" }
+          width: et1.width + 22; height: 28; radius: engine.theme.radius
+          color: win.view === "edit" ? engine.theme.accentSoft : "transparent"; border.color: win.view === "edit" ? engine.theme.accent : engine.theme.border
+          Label { id: et1; anchors.centerIn: parent; text: win.tt("viewEdit"); color: win.view === "edit" ? engine.theme.accent : engine.theme.textMuted; font.pixelSize: 11; font.bold: win.view === "edit" }
           MouseArea { anchors.fill: parent; onClicked: win.view = "edit" }
         }
         Item { width: 6; height: 1 }
         Rectangle {
-          width: et2.width + 22; height: 28; radius: T.radius
-          color: win.view === "out" ? T.accentSoft : "transparent"; border.color: win.view === "out" ? T.accent : T.border
-          Label { id: et2; anchors.centerIn: parent; text: win.tt("viewOutputs"); color: win.view === "out" ? T.accent : T.textMuted; font.pixelSize: 11; font.bold: win.view === "out" }
+          width: et2.width + 22; height: 28; radius: engine.theme.radius
+          color: win.view === "out" ? engine.theme.accentSoft : "transparent"; border.color: win.view === "out" ? engine.theme.accent : engine.theme.border
+          Label { id: et2; anchors.centerIn: parent; text: win.tt("viewOutputs"); color: win.view === "out" ? engine.theme.accent : engine.theme.textMuted; font.pixelSize: 11; font.bold: win.view === "out" }
           MouseArea { anchors.fill: parent; onClicked: { win.view = "out"; win.refreshOutputs() } }
         }
       }
       Item { Layout.fillWidth: true }
-      Label { visible: win.view === "edit"; text: "␣ play · ←→ frame · I/O · L loop"; color: T.textDim; font.pixelSize: 10 }
+      Label { visible: win.view === "edit"; text: "␣ play · ←→ frame · I/O · L loop"; color: engine.theme.textDim; font.pixelSize: 10 }
       Item { Layout.fillWidth: true }
+      NleButton { text: "↥ " + win.tt("openProject"); tip: engine.projectFile; onClicked: projectOpenDialog.open() }
+      NleButton { text: "⇩ " + win.tt("saveAs"); tip: engine.projectFile; onClicked: projectSaveDialog.open() }
       NleButton { text: "⊞ " + win.tt("panels"); onClicked: panelsPopup.open() }
       NleButton { text: win.tt("langButton"); onClicked: engine.language = engine.language === "es" ? "en" : "es" }
     }
@@ -1054,10 +1193,10 @@ ApplicationWindow {
       x: parent.width - width - 12; y: 48
       padding: 6
       closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-      background: Rectangle { color: T.panel; border.color: T.border; radius: T.radius }
+      background: Rectangle { color: engine.theme.panel; border.color: engine.theme.border; radius: engine.theme.radius }
       contentItem: ColumnLayout {
         spacing: 2
-        Label { text: win.tt("panels").toUpperCase(); color: T.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1.2; Layout.leftMargin: 6; Layout.topMargin: 4 }
+        Label { text: win.tt("panels").toUpperCase(); color: engine.theme.textDim; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1.2; Layout.leftMargin: 6; Layout.topMargin: 4 }
         Repeater {
           model: win.allPanels
           delegate: Rectangle {
@@ -1070,11 +1209,11 @@ ApplicationWindow {
               anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8; spacing: 8
               Rectangle {
                 width: 14; height: 14; radius: 3
-                color: prow.checked ? T.accent : T.panelDeep
-                border.color: prow.checked ? T.accent : T.border
+                color: prow.checked ? engine.theme.accent : engine.theme.panelDeep
+                border.color: prow.checked ? engine.theme.accent : engine.theme.border
                 Label { anchors.centerIn: parent; text: "✓"; color: "#16161e"; font.pixelSize: 9; visible: prow.checked }
               }
-              Label { text: win.panelTitle(modelData); color: T.text; font.pixelSize: 11 }
+              Label { text: win.panelTitle(modelData); color: engine.theme.text; font.pixelSize: 11 }
             }
             MouseArea {
               id: pma; anchors.fill: parent; hoverEnabled: true
@@ -1082,6 +1221,30 @@ ApplicationWindow {
             }
           }
         }
+      }
+    }
+  }
+
+  FileDialog {
+    id: projectOpenDialog
+    fileMode: FileDialog.OpenFile
+    nameFilters: ["Omareel project (*.json)"]
+    onAccepted: {
+      var doc = engine.openProjectFile(selectedFile)
+      if (doc && doc.version) { win.applyProject(doc); win.lastSavedStr = JSON.stringify(win.projectDoc()) }
+    }
+  }
+  FileDialog {
+    id: projectSaveDialog
+    fileMode: FileDialog.SaveFile
+    defaultSuffix: "json"
+    nameFilters: ["Omareel project (*.json)"]
+    onAccepted: {
+      var doc = win.projectDoc(false)
+      if (engine.saveProjectAs(selectedFile, doc)) {
+        var saved = engine.openProjectFile(selectedFile)
+        if (saved && saved.version) win.applyProject(saved)
+        win.lastSavedStr = JSON.stringify(win.projectDoc())
       }
     }
   }
@@ -1161,7 +1324,7 @@ ApplicationWindow {
                 anchors.bottomMargin: -6
                 height: 12; z: 30; color: "transparent"
                 Rectangle { anchors.centerIn: parent; width: parent.width; height: 3; radius: 1.5
-                            color: rma.containsMouse || rma.pressed ? T.accent : T.border }
+                            color: rma.containsMouse || rma.pressed ? engine.theme.accent : engine.theme.border }
                 MouseArea {
                   id: rma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.SizeVerCursor
                   property real startY: 0
@@ -1184,7 +1347,7 @@ ApplicationWindow {
             anchors.rightMargin: -6
             width: 12; z: 30; color: "transparent"
             Rectangle { anchors.centerIn: parent; width: 3; height: parent.height; radius: 1.5
-                        color: cma.containsMouse || cma.pressed ? T.accent : T.border }
+                        color: cma.containsMouse || cma.pressed ? engine.theme.accent : engine.theme.border }
             MouseArea {
               id: cma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.SizeHorCursor
               property real startX: 0
@@ -1213,7 +1376,7 @@ ApplicationWindow {
       visible: win.view === "edit"
       Layout.fillWidth: true; Layout.preferredHeight: 7; color: "transparent"
       Rectangle { anchors.centerIn: parent; width: 64; height: 3; radius: 1.5
-                  color: tlma.containsMouse || tlma.pressed ? T.accent : T.border }
+                  color: tlma.containsMouse || tlma.pressed ? engine.theme.accent : engine.theme.border }
       MouseArea {
         id: tlma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.SizeVerCursor
         property real startY: 0; property real startH: 0
@@ -1271,16 +1434,16 @@ ApplicationWindow {
     visible: win.dropSlot !== null && win.dragPanel !== ""
     x: win.dropSlot ? win.dropSlot.x : 0; y: win.dropSlot ? win.dropSlot.y : 0
     width: win.dropSlot ? win.dropSlot.w : 0; height: win.dropSlot ? win.dropSlot.h : 0
-    color: T.accent; radius: 2; z: 99
+    color: engine.theme.accent; radius: 2; z: 99
   }
 
   // drag ghost overlay
   Rectangle {
     id: dragGhost
     visible: win.dragPanel !== ""
-    width: ghostLbl.width + 24; height: 30; radius: T.radius
-    color: T.accentSoft; border.color: T.accent; opacity: 0.9; z: 100
+    width: ghostLbl.width + 24; height: 30; radius: engine.theme.radius
+    color: engine.theme.accentSoft; border.color: engine.theme.accent; opacity: 0.9; z: 100
     y: 60
-    Label { id: ghostLbl; anchors.centerIn: parent; text: win.dragPanel.toUpperCase(); color: T.text; font.pixelSize: 11; font.bold: true }
+    Label { id: ghostLbl; anchors.centerIn: parent; text: win.dragPanel.toUpperCase(); color: engine.theme.text; font.pixelSize: 11; font.bold: true }
   }
 }
