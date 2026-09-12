@@ -12,6 +12,7 @@ import QtQuick.Controls
 import QtMultimedia
 import Qt5Compat.GraphicalEffects
 import "Theme.js" as T
+import "Keyframes.js" as Keyframes
 
 Item {
   id: ov
@@ -25,13 +26,13 @@ Item {
   signal layerMoved(int index, var patch)
   signal layerPressed(int index)
 
-  function inRange(l) { return position >= (l.inS || 0) && position <= (l.outS || 1e9) }
+  function inRange(l) { return position >= (l.inS !== undefined ? l.inS : 0) && position <= (l.outS !== undefined ? l.outS : 1e9) }
 
   // dual-space accessors: program coords default to the output coords (and vice versa)
-  function gx(l) { return ov.space === "prog" ? (l.px !== undefined ? l.px : (l.x || 0.5)) : (l.x || 0.5) }
-  function gy(l) { return ov.space === "prog" ? (l.py !== undefined ? l.py : (l.y || 0.5)) : (l.y || 0.5) }
-  function gw(l) { return ov.space === "prog" ? (l.pw !== undefined ? l.pw : (l.w || 0.35)) : (l.w || 0.35) }
-  function gh(l) { return ov.space === "prog" ? (l.ph !== undefined ? l.ph : (l.h || 0.20)) : (l.h || 0.20) }
+  function gx(l) { return ov.space === "prog" ? (l.px !== undefined ? l.px : (l.x !== undefined ? l.x : 0.5)) : (l.x !== undefined ? l.x : 0.5) }
+  function gy(l) { return ov.space === "prog" ? (l.py !== undefined ? l.py : (l.y !== undefined ? l.y : 0.5)) : (l.y !== undefined ? l.y : 0.5) }
+  function gw(l) { return ov.space === "prog" ? (l.pw !== undefined ? l.pw : (l.w !== undefined ? l.w : 0.35)) : (l.w !== undefined ? l.w : 0.35) }
+  function gh(l) { return ov.space === "prog" ? (l.ph !== undefined ? l.ph : (l.h !== undefined ? l.h : 0.20)) : (l.h !== undefined ? l.h : 0.20) }
 
   // identification frame: the layer's own color wins over the theme default
   function frameColor(l, fallback) { return l.color ? l.color : fallback }
@@ -58,8 +59,11 @@ Item {
     delegate: Item {
       id: ld
       required property int index
-      readonly property var modelData: { ov.rev; return Object.assign({}, ov.layers[index]) }
+      // Evaluate the project keyframes against the shared timeline position.
+      // A fresh snapshot keeps live C++/QML edits from retaining stale values.
+      readonly property var modelData: { ov.rev; return Keyframes.at(ov.layers[index], ov.position) }
       visible: { ov.rev; return ov.inRange(modelData) }
+      opacity: { ov.rev; return Keyframes.opacityAt(ov.layers[index], ov.position) }
       z: index
 
       // text layer
@@ -90,7 +94,7 @@ Item {
           anchors.fill: parent
           color: "transparent"
           border.width: 2
-          border.color: { ov.rev; return ov.frameColor(ld.modelData, T.textDim) }
+          border.color: { ov.rev; return ov.frameColor(ld.modelData, engine.theme.textDim) }
           radius: 3
         }
         DragArea { layerIndex: ld.index }
@@ -109,7 +113,7 @@ Item {
           anchors.fill: parent
           color: "transparent"
           border.width: 2
-          border.color: { ov.rev; return ov.frameColor(ld.modelData, T.textDim) }
+          border.color: { ov.rev; return ov.frameColor(ld.modelData, engine.theme.textDim) }
           radius: 3
         }
         DragArea { layerIndex: ld.index }
@@ -124,7 +128,7 @@ Item {
         y: { ov.rev; return ov.gy(modelData) * ov.height - height / 2 }
         color: "transparent"
         border.width: 2
-        border.color: { ov.rev; return ov.frameColor(ld.modelData, T.magenta) }
+        border.color: { ov.rev; return ov.frameColor(ld.modelData, engine.theme.magenta) }
         // shape: rect | rounded | circle (mask via OpacityMask)
         Item {
           id: lvContent

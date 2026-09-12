@@ -5,13 +5,13 @@ import "Theme.js" as T
 
 TextField {
   id: f
-  color: T.text
+  color: engine.theme.text
   font.pixelSize: 11
-  placeholderTextColor: T.textDim
-  selectionColor: T.accentSoft
+  placeholderTextColor: engine.theme.textDim
+  selectionColor: engine.theme.accentSoft
   background: Rectangle {
-    color: f.activeFocus ? "#1a1e30" : T.panelDeep
-    border.color: f.activeFocus ? T.accent : T.border
-    border.width: 1; radius: T.radius
+    color: f.activeFocus ? "#1a1e30" : engine.theme.panelDeep
+    border.color: f.activeFocus ? engine.theme.accent : engine.theme.border
+    border.width: 1; radius: engine.theme.radius
   }
 }

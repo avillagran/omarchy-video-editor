@@ -66,7 +66,16 @@ var dict = {
     viewEdit: "Editar",
     viewOutputs: "Salidas",
     capasPanel: "Capas",
-    addImage: "Imagen…"
+    addImage: "Imagen…",
+    openProject: "Abrir",
+    saveAs: "Guardar como",
+    subtitleNormal: "Normal · película",
+    subtitleReel: "Reel · capas editables",
+    subtitleGenerate: "Generar",
+    subtitleWorking: "Transcribiendo localmente…",
+    subtitleReady: "Subtítulos listos",
+    keyframe: "Clave",
+    keyframeTip: "Guarda las propiedades actuales en el cabezal. El tween usa la curva elegida."
   },
   en: {
     sources: "Sources",
@@ -130,7 +139,16 @@ var dict = {
     viewEdit: "Edit",
     viewOutputs: "Outputs",
     capasPanel: "Layers",
-    addImage: "Image…"
+    addImage: "Image…",
+    openProject: "Open",
+    saveAs: "Save as",
+    subtitleNormal: "Normal · movie",
+    subtitleReel: "Reel · editable layers",
+    subtitleGenerate: "Generate",
+    subtitleWorking: "Transcribing locally…",
+    subtitleReady: "Subtitles ready",
+    keyframe: "Keyframe",
+    keyframeTip: "Stores the current properties at the playhead. The selected curve controls the tween."
   }
 }
 

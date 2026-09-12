@@ -13,7 +13,7 @@ source-space coords, fractions 0-1 for frame-space coords, seconds for time.
 {
   "version": 1,
   "app": "omareel",
-  "video": "/abs/path/source.mp4",        // library video shown in PROGRAM
+  "video": "/abs/path/source.mp4",        // absolute, or relative to this JSON
   "trim":  { "in": 5.0, "out": 10.0 },    // seconds, source timeline
   "template": "completa",                 // global layout when no blocks:
                                           // completa | apilar | pip | circulo
@@ -30,7 +30,12 @@ source-space coords, fractions 0-1 for frame-space coords, seconds for time.
   },
   "layers": [                             // overlays, z-order = array order
     { "type": "text",  "text": "Hola", "x": 0.5, "y": 0.15, "size": 90,
-      "color": "#ffffff", "font": "", "inS": 5.0, "outS": 10.0 },
+      "color": "#ffffff", "font": "", "opacity": 1.0,
+      "inS": 5.0, "outS": 10.0, "fadeIn": 0.35, "fadeOut": 0.5,
+      "keyframes": [
+        { "time": 5.0, "x": 0.15, "y": 0.82, "size": 64, "easing": "easeOut" },
+        { "time": 8.0, "x": 0.50, "y": 0.15, "size": 96 }
+      ] },
     { "type": "gif",   "path": "/abs/a.gif",  "x": 0.5, "y": 0.5, "w": 0.35, "h": 0.20, "inS": 0, "outS": 5 },
     { "type": "image", "path": "/abs/a.png",  "x": 0.5, "y": 0.5, "w": 0.35, "h": 0.20, "inS": 0, "outS": 5 },
     { "type": "video", "path": "/abs/b.mp4",  "x": 0.5, "y": 0.72, "w": 0.40, "h": 0.23,
@@ -41,6 +46,11 @@ source-space coords, fractions 0-1 for frame-space coords, seconds for time.
     //   editing — drag in PROGRAM writes px,py; drag in OUTPUT writes x,y.
     //   Omit px/py to mirror x/y on the program monitor.
     // inS/outS = seconds on the CUT timeline (0 = cut start)
+    // keyframes = optional property snapshots. x/y/w/h, px/py/pw/ph, text
+    // size and opacity tween in both live previews and ffmpeg exports.
+    // fadeIn/fadeOut are layer-edge fades and combine with animated opacity.
+    // easing lives on the starting keyframe: linear | easeIn | easeOut |
+    // easeInOut | backOut | bounce.
   ],
   "blocks": [                             // timeline blocks (pista B); [] = single
     { "start": 0.0, "end": 3.0, "layout": "completa",
@@ -75,3 +85,8 @@ source-space coords, fractions 0-1 for frame-space coords, seconds for time.
 - Block `layout` overrides the global `template` for its time range; when
   `blocks` is non-empty, rendering concatenates the blocks in array order.
 - The block under the playhead is what PROGRAM/OUTPUT preview and edit.
+- `video`, `srt`, and layer `path` values may be relative to the project file;
+  this is how projects under `examples/` remain portable.
+- `project.json` is the default autosave project. The Open and Save as controls
+  can switch to any local `.json` project; autosave and live reload follow the
+  selected file.
