@@ -22,14 +22,19 @@ class AndroidPackaging(unittest.TestCase):
         self.assertIn("ANDROID_PACKAGE_SOURCE_DIR", PROJECT)
         manifest = (ROOT / "android" / "AndroidManifest.xml").read_text()
         self.assertIn('package="cl.villagranquiroz.omareel"', manifest)
-        self.assertIn('android:versionName="0.0.1"', manifest)
+        self.assertIn('android:versionCode="2"', manifest)
+        self.assertIn('android:versionName="0.0.2"', manifest)
         self.assertIn('android:allowBackup="false"', manifest)
         self.assertIn('android:screenOrientation="sensorLandscape"', manifest)
+        self.assertNotIn('READ_MEDIA_VIDEO', manifest)
+        self.assertNotIn('READ_EXTERNAL_STORAGE', manifest)
 
     def test_android_content_uri_is_copied_and_loaded(self):
         self.assertIn('sourceUrl.scheme() == QLatin1String("content")', ENGINE)
         self.assertIn('openFileDescriptor', ENGINE)
         self.assertNotIn('while (!input.atEnd())', ENGINE)
+        self.assertIn('displayName == QLatin1String(".")', ENGINE)
+        self.assertIn('::close(fd)', ENGINE)
         self.assertIn('var imported = engine.importVideo(selectedFile)', MAIN)
         self.assertIn('win.loadVideo(imported)', MAIN)
 

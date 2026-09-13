@@ -51,12 +51,12 @@ Deploy QML to the VM: `rsync -a --delete native/qml/ <vm>:~/.local/share/omareel
 
 ### Android tablet build
 
-OMAREEL 0.0.1 has an Android arm64 build for tablets and phones. It uses the
+OMAREEL 0.0.2 has an Android arm64 build for tablets and phones. It uses the
 package id `cl.villagranquiroz.omareel`, opens in landscape, imports videos from
 Android's document picker, and uses Qt Multimedia for local preview playback.
 
 Download the versioned APK from the
-[v0.0.1 release](https://github.com/avillagran/omarchy-video-editor/releases/tag/v0.0.1).
+[v0.0.2 release](https://github.com/avillagran/omarchy-video-editor/releases/tag/v0.0.2).
 
 The current Android build does not bundle command-line ffmpeg/ffprobe, so local
 render export and offline ASR remain desktop-only until native Android media
@@ -105,7 +105,7 @@ layer input using Qt keyboard events, checks focus and autosave, then performs
 another external edit. Screenshots, observations and timings are retained in
 the temporary directory printed by the test.
 
-Requires Qt6 Quick, Multimedia and Test development packages, Python 3 and a
+Requires Qt 6.5+ Quick, Multimedia and Test development packages, Python 3 and a
 real source video of at least ten seconds. From the repository root:
 
 ```bash
@@ -142,7 +142,7 @@ project or restarts the installed editor.
 - Right-drag the trim band or either trim handle to move the whole selection
   without changing its length, including at the source boundaries.
 - Layers: text (QPainter rasterized), GIF, image, PiP video with shape
-  (rect/rounded/circle — live OpacityMask, alphamerge+PNG mask on render).
+  (rect/rounded/circle — live MultiEffect mask, alphamerge+PNG mask on render).
 - Layer keyframes tween position, dimensions and text size with linear, ease-in,
   ease-out, ease-in-out, back-out or bounce curves. Per-layer opacity and
   fade-in/fade-out are identical in the live previews and rendered MP4.
