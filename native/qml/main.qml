@@ -697,7 +697,16 @@ ApplicationWindow {
     FileDialog {
       id: importDialog; fileMode: FileDialog.OpenFile
       nameFilters: ["Video (*.mp4 *.mkv *.mov *.webm)"]
-      onAccepted: { engine.importVideo(selectedFile); win.refreshSources() }
+      onAccepted: {
+        var imported = engine.importVideo(selectedFile)
+        win.refreshSources()
+        if (imported !== "") {
+          for (var i = 0; i < win.sources.length; i++)
+            if (win.sources[i].path === imported) { win.current = win.sources[i]; break }
+          win.cutPath = ""
+          win.loadVideo(imported)
+        }
+      }
     }
     ListView {
       Layout.fillWidth: true; Layout.fillHeight: true

@@ -3,7 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtMultimedia
-import Qt5Compat.GraphicalEffects
+import QtQuick.Effects
 import "Theme.js" as T
 
 Item {
@@ -114,7 +114,7 @@ Item {
           }
         }
 
-        // ---- pip / circulo foreground (OpacityMask = true circular crop) ----
+        // ---- pip / circulo foreground (MultiEffect = true circular crop) ----
         Rectangle {
           id: fgBox
           visible: op.isPip
@@ -126,11 +126,11 @@ Item {
           color: "transparent"
           border.color: op.layout === "circulo" ? engine.theme.magenta : engine.theme.border
           border.width: op.layout === "circulo" ? 3 : 1
-          // square mode: direct child with plain clip; circle mode: masked via OpacityMask
+          // square mode: direct child with plain clip; circle mode: masked via MultiEffect
           Item {
             id: fgContent
             anchors.fill: parent
-            visible: false   // rendered offscreen by OpacityMask
+            visible: false   // rendered offscreen by MultiEffect
             VideoOutput {
               id: vFg
               property real rw: Math.max(1, op.fgRegion.w / 100 * op.srcW)
@@ -143,9 +143,11 @@ Item {
           }
           Rectangle { id: fgMaskSquare; visible: false; width: fgBox.width; height: fgBox.height; radius: 4; color: "#fff" }
           Rectangle { id: fgMaskCircle; visible: false; width: fgBox.width; height: fgBox.height; radius: width / 2; color: "#fff" }
-          OpacityMask {
+          MultiEffect {
             anchors.fill: parent
             source: fgContent
+            maskEnabled: true
+            autoPaddingEnabled: false
             maskSource: op.layout === "circulo" ? fgMaskCircle : fgMaskSquare
           }
         }

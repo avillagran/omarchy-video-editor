@@ -23,6 +23,11 @@
 #include <QCoreApplication>
 #include <algorithm>
 
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#include <QtCore/qcoreapplication_platform.h>
+#endif
+
 static QString ffprobeBin() { return QStringLiteral("ffprobe"); }
 static QString ffmpegBin() { return QStringLiteral("ffmpeg"); }
 
@@ -876,7 +881,58 @@ void OmareelEngine::requestStrip(const QString &videoPath, int frames) {
 }
 
 QString OmareelEngine::importVideo(const QString &fileUrl) {
-  const QString src = QUrl(fileUrl).toLocalFile();
+  const QUrl sourceUrl(fileUrl);
+#ifdef Q_OS_ANDROID
+  if (sourceUrl.scheme() == QLatin1String("content")) {
+    const QJniObject context = QNativeInterface::QAndroidApplication::context();
+    const QJniObject resolver = context.callObjectMethod(
+        "getContentResolver", "()Landroid/content/ContentResolver;");
+    const QJniObject uri = QJniObject::callStaticObjectMethod(
+        "android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;",
+        QJniObject::fromString(fileUrl).object<jstring>());
+    if (!resolver.isValid() || !uri.isValid()) return {};
+
+    QString displayName;
+    QJniObject cursor = resolver.callObjectMethod(
+        "query", "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;",
+        uri.object<jobject>(), static_cast<jobjectArray>(nullptr), static_cast<jstring>(nullptr),
+        static_cast<jobjectArray>(nullptr), static_cast<jstring>(nullptr));
+    if (cursor.isValid() && cursor.callMethod<jboolean>("moveToFirst", "()Z")) {
+      const int column = cursor.callMethod<jint>(
+          "getColumnIndex", "(Ljava/lang/String;)I",
+          QJniObject::fromString(QStringLiteral("_display_name")).object<jstring>());
+      if (column >= 0)
+        displayName = cursor.callObjectMethod("getString", "(I)Ljava/lang/String;", column).toString();
+    }
+    if (cursor.isValid()) cursor.callMethod<void>("close", "()V");
+    displayName = QFileInfo(displayName).fileName();
+    displayName.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._ -]")), QStringLiteral("_"));
+    if (displayName.isEmpty()) displayName = QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".mp4");
+    if (QFileInfo(displayName).suffix().isEmpty()) displayName += QStringLiteral(".mp4");
+    const QString dst = m_dataDir + QStringLiteral("/media/") + displayName;
+    if (QFileInfo::exists(dst)) return dst;
+
+    const QJniObject mode = QJniObject::fromString(QStringLiteral("r"));
+    QJniObject parcel = resolver.callObjectMethod(
+        "openFileDescriptor", "(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;",
+        uri.object<jobject>(), mode.object<jstring>());
+    if (!parcel.isValid()) return {};
+    const int fd = parcel.callMethod<jint>("detachFd", "()I");
+    QFile input;
+    QSaveFile output(dst);
+    if (fd < 0 || !input.open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)
+        || !output.open(QIODevice::WriteOnly)) return {};
+    QByteArray chunk(1024 * 1024, Qt::Uninitialized);
+    for (;;) {
+      const qint64 count = input.read(chunk.data(), chunk.size());
+      if (count < 0) return {};
+      if (count == 0) break;
+      if (output.write(chunk.constData(), count) != count) return {};
+    }
+    return output.commit() ? dst : QString();
+  }
+#endif
+  const QString src = sourceUrl.toLocalFile();
   if (src.isEmpty()) return {};
   const QString dst = m_dataDir + QStringLiteral("/media/") + QFileInfo(src).fileName();
   if (QFileInfo::exists(dst)) return dst;
