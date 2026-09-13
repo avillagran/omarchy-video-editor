@@ -49,6 +49,19 @@ sudo make install             # installs the binary and bundled ASR helper
 
 Deploy QML to the VM: `rsync -a --delete native/qml/ <vm>:~/.local/share/omareel/native-qml/`
 
+### Android tablet build
+
+OMAREEL 0.0.1 has an Android arm64 build for tablets and phones. It uses the
+package id `cl.villagranquiroz.omareel`, opens in landscape, imports videos from
+Android's document picker, and uses Qt Multimedia for local preview playback.
+
+Download the versioned APK from the
+[v0.0.1 release](https://github.com/avillagran/omarchy-video-editor/releases/tag/v0.0.1).
+
+The current Android build does not bundle command-line ffmpeg/ffprobe, so local
+render export and offline ASR remain desktop-only until native Android media
+backends are integrated.
+
 ### Offline subtitles
 
 The subtitle action launches `native/scripts/transcribe_local.py` locally. It

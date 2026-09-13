@@ -1,10 +1,17 @@
 QT += quick multimedia
 CONFIG += c++17
 TARGET = omareel-native
+VERSION = 0.0.1
 TEMPLATE = app
 SOURCES += src/main.cpp src/engine.cpp
 HEADERS += src/engine.h
 RESOURCES += qml.qrc
+
+android {
+    ANDROID_PACKAGE_SOURCE_DIR = $$PWD/android
+    ANDROID_TARGET_SDK_VERSION = 35
+    ANDROID_MIN_SDK_VERSION = 28
+}
 
 isEmpty(PREFIX): PREFIX = /usr/local
 target.path = $$PREFIX/bin

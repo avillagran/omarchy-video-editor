@@ -10,7 +10,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtMultimedia
-import Qt5Compat.GraphicalEffects
+import QtQuick.Effects
 import "Theme.js" as T
 import "Keyframes.js" as Keyframes
 
@@ -129,19 +129,21 @@ Item {
         color: "transparent"
         border.width: 2
         border.color: { ov.rev; return ov.frameColor(ld.modelData, engine.theme.magenta) }
-        // shape: rect | rounded | circle (mask via OpacityMask)
+        // shape: rect | rounded | circle (mask via Qt 6 MultiEffect)
         Item {
           id: lvContent
           anchors.fill: parent
-          visible: false   // rendered offscreen by OpacityMask
+          visible: false   // rendered offscreen by MultiEffect
           VideoOutput { id: lvOut; anchors.fill: parent }
         }
         Rectangle { id: lvMaskRect; visible: false; width: parent.width; height: parent.height; radius: 4; color: "#fff" }
         Rectangle { id: lvMaskRound; visible: false; width: parent.width; height: parent.height; radius: Math.min(width, height) * 0.12; color: "#fff" }
         Rectangle { id: lvMaskCircle; visible: false; width: parent.width; height: parent.height; radius: Math.min(width, height) / 2; color: "#fff" }
-        OpacityMask {
+        MultiEffect {
           anchors.fill: parent
           source: lvContent
+          maskEnabled: true
+          autoPaddingEnabled: false
           maskSource: { ov.rev; return (modelData.shape || "rect") === "circle" ? lvMaskCircle
                     : (modelData.shape === "rounded" ? lvMaskRound : lvMaskRect) }
         }
