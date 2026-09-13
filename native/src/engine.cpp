@@ -26,6 +26,7 @@
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
+#include <unistd.h>
 #endif
 
 static QString ffprobeBin() { return QStringLiteral("ffprobe"); }
@@ -907,10 +908,17 @@ QString OmareelEngine::importVideo(const QString &fileUrl) {
     if (cursor.isValid()) cursor.callMethod<void>("close", "()V");
     displayName = QFileInfo(displayName).fileName();
     displayName.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._ -]")), QStringLiteral("_"));
-    if (displayName.isEmpty()) displayName = QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".mp4");
+    displayName = displayName.left(180);
+    if (displayName.trimmed().isEmpty() || displayName == QLatin1String(".")
+        || displayName == QLatin1String(".."))
+      displayName = QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".mp4");
     if (QFileInfo(displayName).suffix().isEmpty()) displayName += QStringLiteral(".mp4");
-    const QString dst = m_dataDir + QStringLiteral("/media/") + displayName;
-    if (QFileInfo::exists(dst)) return dst;
+    QString dst = m_dataDir + QStringLiteral("/media/") + displayName;
+    if (QFileInfo::exists(dst)) {
+      displayName = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8)
+          + QStringLiteral("-") + displayName;
+      dst = m_dataDir + QStringLiteral("/media/") + displayName;
+    }
 
     const QJniObject mode = QJniObject::fromString(QStringLiteral("r"));
     QJniObject parcel = resolver.callObjectMethod(
@@ -920,8 +928,12 @@ QString OmareelEngine::importVideo(const QString &fileUrl) {
     const int fd = parcel.callMethod<jint>("detachFd", "()I");
     QFile input;
     QSaveFile output(dst);
-    if (fd < 0 || !input.open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)
-        || !output.open(QIODevice::WriteOnly)) return {};
+    if (fd < 0) return {};
+    if (!input.open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+      ::close(fd);
+      return {};
+    }
+    if (!output.open(QIODevice::WriteOnly)) return {};
     QByteArray chunk(1024 * 1024, Qt::Uninitialized);
     for (;;) {
       const qint64 count = input.read(chunk.data(), chunk.size());
