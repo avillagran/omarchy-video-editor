@@ -1,4 +1,4 @@
-// Headless renderer for a real Omareel project JSON.
+// Headless renderer for a real OmaShort project JSON.
 #include <QGuiApplication>
 #include <QEventLoop>
 #include <QJsonDocument>

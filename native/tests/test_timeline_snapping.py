@@ -11,7 +11,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QUrl, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QPointF, QUrl, Qt
 from PySide6.QtGui import QGuiApplication, QMouseEvent
 from PySide6.QtQml import QQmlComponent, QQmlPropertyMap
 from PySide6.QtQuick import QQuickView
@@ -44,9 +44,14 @@ Timeline {
     duration: 20; zoom: 50; position: 5
     trimIn: 1; trimOut: 18
     layers: [{inS: 2, outS: 4, text: "First"}, {inS: 8, outS: 10, text: "Second"}]
+    videoPresent: false
     blocks: [{start: 12, end: 14, layout: "completa"}]
     property real lastA: -1
     property real lastB: -1
+    property int deleteCount: 0
+    property string trackLabel0: layerTrackLabel(0)
+    property string trackLabel1: layerTrackLabel(1)
+    property string trackLabel2: layerTrackLabel(2)
     property bool applyEdits: false
     onLayerEdited: function(i, a, b) {
         lastA = a; lastB = b
@@ -64,6 +69,7 @@ Timeline {
         }
     }
     onTrimEdited: function(a, b) { lastA = a; lastB = b }
+    onDeleteVideoRequested: deleteCount++
 }
 ''' % QML_DIR.as_uri()).encode(), QUrl())
         self.assertFalse(component.isError(), str(component.errors()))
@@ -81,7 +87,8 @@ Timeline {
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def point(self, seconds, y):
-        return QPoint(round(47 + seconds * self.timeline.property("zoom")), y)
+        return QPoint(round(self.timeline.property("headW") + 1
+                            + seconds * self.timeline.property("zoom")), y)
 
     def drag(self, start, end, button=Qt.LeftButton, modifiers=Qt.NoModifier):
         QTest.mousePress(self.view, button, modifiers, start)
@@ -108,6 +115,24 @@ Timeline {
         self.assertEqual(self.timeline.property("snappingEnabled"), True)
         QTest.keyClick(self.view, Qt.Key_Space)
         self.assertEqual(self.timeline.property("snappingEnabled"), False)
+
+    def test_video_track_trash_button_emits_delete_request(self):
+        self.timeline.setProperty("videoPresent", True)
+        button = self.timeline.findChild(QObject, "deleteVideoButton")
+        self.assertIsNotNone(button)
+        button.clicked.emit()
+        self.assertEqual(self.timeline.property("deleteCount"), 1)
+
+    def test_video_layers_are_numbered_after_main_v1_track(self):
+        self.timeline.setProperty("layers", [
+            {"type": "video", "inS": 0, "outS": 4},
+            {"type": "text", "inS": 0, "outS": 4},
+            {"type": "video", "inS": 4, "outS": 8},
+        ])
+        QTest.qWait(20)
+        self.assertEqual(self.timeline.property("trackLabel0"), "V2")
+        self.assertEqual(self.timeline.property("trackLabel1"), "T1")
+        self.assertEqual(self.timeline.property("trackLabel2"), "V3")
 
     def test_alt_temporarily_bypasses_snapping_during_drag(self):
         start = self.point(3, 120)

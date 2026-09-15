@@ -1,4 +1,4 @@
-// main.qml - Omareel Native: NLE layout with dockable/collapsible panels
+// main.qml - OmaShort Native: NLE layout with dockable/collapsible panels
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -13,13 +13,14 @@ ApplicationWindow {
   id: win
   width: 1440; height: 900; minimumWidth: 1024; minimumHeight: 640
   visible: true
-  title: "Omareel"
+  title: "OmaShort"
   color: engine.theme.app
 
   // ---- state ----
   property var sources: []
   property var outputs: []
   property var current: null
+  property bool primaryAudioEnabled: true
   property string cutPath: ""
   property var jobs: []
   property var layers: []
@@ -185,13 +186,19 @@ ApplicationWindow {
   function activeSplit() { var b = activeBlock(); return b ? (b.split || 0.5) : split }
   function mkBlock(st, en, lay) {
     var full = { x: 0, y: 0, w: 100, h: 100 }, cen = { x: 25, y: 25, w: 50, h: 50 }
-    return { start: st, end: en, layout: lay, split: 0.5, fx: 0.5, fy: 0.72,
+    return { start: st, end: en, layout: lay, visible: true, split: 0.5, fx: 0.5, fy: 0.72,
              regions: { main: full, top: full, bottom: { x: 0, y: 50, w: 100, h: 50 }, fg: cen } }
   }
   function ensureBlocks() {
     if (blocks.length) return
-    blocks = [mkBlock(0, durS, layoutName())]
+    blocks = [mkBlock(0, durS(), layoutName())]
     selectedBlock = 0
+  }
+  function toggleSelectedBlockVisibility() {
+    if (selectedBlock < 0 || selectedBlock >= blocks.length) return
+    var copy = blocks.slice(), b = Object.assign({}, copy[selectedBlock])
+    b.visible = b.visible === false
+    copy[selectedBlock] = b; blocks = copy; blocksRev = (blocksRev + 1) % 2000000000
   }
   function splitBlockAt(t) {
     ensureBlocks()
@@ -207,6 +214,33 @@ ApplicationWindow {
       }
     }
   }
+  function cutSelectedAt(t) {
+    if (selectedLayer >= 0 && selectedLayer < layers.length) {
+      var layer = layers[selectedLayer]
+      if (layer && t > layer.inS + 0.1 && t < layer.outS - 0.1) {
+        var left = JSON.parse(JSON.stringify(layer)), right = JSON.parse(JSON.stringify(layer))
+        left.outS = t; right.inS = t
+        var copy = layers.slice(); copy.splice(selectedLayer, 1, left, right); layers = copy
+        selectedLayer++; touchLayers(); return
+      }
+    }
+    splitBlockAt(t)
+  }
+  function deleteSelectedClip() {
+    if (selectedLayer >= 0 && selectedLayer < layers.length) {
+      var copy = layers.slice(); copy.splice(selectedLayer, 1); layers = copy
+      selectedLayer = -1; touchLayers(); return
+    }
+    if (selectedBlock >= 0 && blocks.length > 1) {
+      var bp = blocks.slice(); bp.splice(selectedBlock, 1); blocks = bp
+      selectedBlock = Math.min(selectedBlock, blocks.length - 1); blocksRev = (blocksRev + 1) % 2000000000
+    }
+  }
+  Shortcut {
+    sequence: "B"
+    enabled: win.view === "edit"
+    onActivated: win.cutSelectedAt(player.position / 1000)
+  }
   function setBlockLayout(lay) {
     var b = activeBlock(); if (!b) { tplIndex = lay === "apilar" ? 1 : (lay === "pip" ? 2 : (lay === "circulo" ? 3 : 0)); return }
     b.layout = lay; var cp = blocks.slice(); cp[selectedBlock] = b; blocks = cp
@@ -215,13 +249,44 @@ ApplicationWindow {
     if (!blocks.length) return -1
     var t = playerRef ? playerRef.position / 1000 : 0
     for (var i = 0; i < blocks.length; i++)
-      if (t >= blocks[i].start && t < blocks[i].end) return i
-    return blocks.length - 1
+      if (blocks[i].visible !== false && t >= blocks[i].start && t < blocks[i].end) return i
+    return -1
+  }
+  function loopVisibleAt(t) {
+    if (!blocks.length) return -1
+    for (var i = 0; i < blocks.length; i++)
+      if (blocks[i].visible !== false && t >= blocks[i].start && t < blocks[i].end) return i
+    return -1
+  }
+  function loopToVisible(t) {
+    var first = -1
+    for (var i = 0; i < blocks.length; i++) {
+      if (blocks[i].visible === false) continue
+      if (first < 0) first = i
+      if (blocks[i].start >= t) return blocks[i].start
+    }
+    return first >= 0 ? blocks[first].start : -1
+  }
+  function loopRestartPosition() {
+    var p = loopToVisible(trimIn)
+    return p >= 0 ? Math.max(trimIn, p) : trimIn
+  }
+  function enforceVisibleLoop() {
+    if (!loop || !playerRef || !blocks.length || playerRef.playbackState !== MediaPlayer.PlayingState) return
+    var t = playerRef.position / 1000
+    if (t >= trimOut - 0.03) {
+      playerRef.position = Math.round(loopRestartPosition() * 1000)
+      return
+    }
+    if (loopVisibleAt(t) < 0) {
+      var next = loopToVisible(t + 0.02)
+      playerRef.position = Math.round((next >= 0 && next < trimOut ? next : loopRestartPosition()) * 1000)
+    }
   }
   function selectBlockAt(t) {
     if (!blocks.length) { selectedBlock = -1; return }
     for (var i = 0; i < blocks.length; i++)
-      if (t >= blocks[i].start && t < blocks[i].end) { selectedBlock = i; return }
+      if (blocks[i].visible !== false && t >= blocks[i].start && t < blocks[i].end) { selectedBlock = i; return }
     selectedBlock = blocks.length - 1
   }
   property bool lock916: false
@@ -282,7 +347,7 @@ ApplicationWindow {
   function renderSource() { return win.cutPath !== "" ? win.cutPath : (win.current ? win.current.path : "") }
   function buildRenderSegments() {
     if (win.blocks.length) {
-      return win.blocks.map(function (b) {
+      return win.blocks.filter(function (b) { return b.visible !== false }).map(function (b) {
         return { start: b.start, end: b.end, layout: b.layout,
                  regions: b.layout === "apilar"
                    ? { top: b.regions.top, bottom: b.regions.bottom, split: b.split || 0.5 }
@@ -300,22 +365,37 @@ ApplicationWindow {
                       : { main: { x: win.regionX, y: win.regionY, w: win.regionW, h: win.regionH } } }]
   }
   // space "out": layers use x,y,w,h (vertical canvas); space "prog": px,py,pw,ph (source frame)
-  function doRender(w, h, space, suffix) {
+  property var pendingRenderFormats: []
+  property int pendingRenderIndex: 0
+  function dialogPath(url) {
+    var s = String(url)
+    return s.indexOf("file://") === 0 ? decodeURIComponent(s.slice(7)) : s
+  }
+  function doRender(w, h, space, suffix, outputPath) {
     var src = win.renderSource()
     if (src === "") return
     engine.renderVertical({
-      clipPath: src, template: win.layoutName(),
+      clipPath: src, template: win.layoutName(), audioEnabled: win.primaryAudioEnabled,
       regions: { main: { x: win.regionX, y: win.regionY, w: win.regionW, h: win.regionH } },
       layers: win.layers, srtPath: win.srtPath, segments: win.buildRenderSegments(),
-      width: w, height: h, space: space, suffix: suffix,
+      width: w, height: h, space: space, suffix: suffix, outputPath: outputPath,
       codec: ["h264", "h265", "vp9"][win.renderCodecIdx] || "h264",
       crf: [18, 23, 28][win.renderQualIdx] || 23,
       preset: ["medium", "veryfast", "veryfast"][win.renderQualIdx] || "veryfast"
     })
   }
   function startRender() {
-    if (win.fmtV) win.doRender(1080, 1920, "out", "-v")
-    if (win.fmtH) win.doRender(1920, 1080, "prog", "-h")
+    win.pendingRenderFormats = []
+    if (win.fmtV) win.pendingRenderFormats.push({ w: 1080, h: 1920, space: "out", suffix: "-v" })
+    if (win.fmtH) win.pendingRenderFormats.push({ w: 1920, h: 1080, space: "prog", suffix: "-h" })
+    if (win.pendingRenderFormats.length) { win.pendingRenderIndex = 0; renderSaveDialog.open() }
+  }
+  function renderSelectedOutput(url) {
+    var f = pendingRenderFormats[pendingRenderIndex]
+    if (!f) return
+    doRender(f.w, f.h, f.space, f.suffix, dialogPath(url))
+    pendingRenderIndex++
+    if (pendingRenderIndex < pendingRenderFormats.length) renderSaveDialog.open()
   }
 
   // ---------- project.json (AI-editable, live-reloaded) ----------
@@ -332,8 +412,9 @@ ApplicationWindow {
   function projectDoc(keepHints) {
     if (keepHints === undefined) keepHints = true
     return {
-      version: 1, app: "omareel",
+      version: 1, app: "omashort",
       video: win.current ? (keepHints ? win.serializedPath(win.current.path) : win.current.path) : "",
+      audioEnabled: win.primaryAudioEnabled,
       trim: { "in": Math.round(win.trimIn * 100) / 100, out: Math.round(win.trimOut * 100) / 100 },
       template: win.layoutName(),
       region: { x: win.regionX, y: win.regionY, w: win.regionW, h: win.regionH },
@@ -352,6 +433,7 @@ ApplicationWindow {
   }
   function applyProject(d) {
     if (!d || !d.version) return
+    if (d.audioEnabled !== undefined) win.primaryAudioEnabled = !!d.audioEnabled
     win.pathHints = d._pathHints || ({})
     if (d.trim) { win.trimIn = d.trim["in"] || 0; win.trimOut = d.trim.out || 1e9 }
     if (d.template) win.tplIndex = d.template === "apilar" ? 1 : (d.template === "pip" ? 2 : (d.template === "circulo" ? 3 : 0))
@@ -360,7 +442,18 @@ ApplicationWindow {
     if (d.editRegions !== undefined) win.editRegions = !!d.editRegions
     if (d.apilar) { if (d.apilar.top) win.apilarTop = d.apilar.top; if (d.apilar.bottom) win.apilarBottom = d.apilar.bottom; if (d.apilar.split) win.split = d.apilar.split }
     if (d.pip) { if (d.pip.fg) win.fgRegion = d.pip.fg; if (d.pip.fx !== undefined) win.pipFx = d.pip.fx; if (d.pip.fy !== undefined) win.pipFy = d.pip.fy }
-    if (d.layers) win.layers = d.layers
+    if (d.layers) {
+      var programAspect = win.srcW / Math.max(1, win.srcH)
+      if (d.video) {
+        var mainProbe = engine.probeVideo(d.video)
+        if (mainProbe.width > 0 && mainProbe.height > 0)
+          programAspect = mainProbe.width / mainProbe.height
+      }
+      var normalizedLayers = []
+      for (var li = 0; li < d.layers.length; li++)
+        normalizedLayers.push(win.normalizeVideoLayerAspect(d.layers[li], programAspect))
+      win.layers = normalizedLayers
+    }
     if (d.blocks) { win.blocks = d.blocks; win.selectedBlock = d.blocks.length ? 0 : -1 }
     if (d.srt !== undefined) win.srtPath = d.srt
     if (d.render) {
@@ -384,7 +477,9 @@ ApplicationWindow {
       if (d.dock.tlHeight !== undefined) win.tlHeight = d.dock.tlHeight
       win.normalizeFr()
     }
-    if (d.video && (!win.current || win.current.path !== d.video)) {
+    if (!d.video) {
+      win.clearMainVideoState()
+    } else if (!win.current || win.current.path !== d.video) {
       var foundVideo = false
       for (var i = 0; i < win.sources.length; i++)
         if (win.sources[i].path === d.video) { win.current = win.sources[i]; foundVideo = true; break }
@@ -400,7 +495,7 @@ ApplicationWindow {
   Timer {
     id: saveTimer; interval: 1500; running: true; repeat: true
     onTriggered: {
-      if (!win.current || win.view !== "edit") return
+      if (win.view !== "edit") return
       var doc = win.projectDoc()
       var str = JSON.stringify(doc)
       if (str !== win.lastSavedStr && engine.saveProject(doc)) win.lastSavedStr = str
@@ -410,6 +505,7 @@ ApplicationWindow {
 
   Connections {
     target: engine
+    function onProjectFileChanged() { win.refreshOutputs() }
     function onProjectChangedExternally(doc) {
       win.applyProject(doc)
       win.lastSavedStr = JSON.stringify(win.projectDoc()) // avoid immediate re-save loop
@@ -417,9 +513,106 @@ ApplicationWindow {
   }
 
   function tt(k) { I18n.lang = engine.language; return I18n.t(k) }
+  function requestNewProject() {
+    var currentDoc = win.projectDoc()
+    var currentStr = JSON.stringify(currentDoc)
+    if (currentStr !== win.lastSavedStr && !engine.saveProject(currentDoc)) return
+    win.lastSavedStr = currentStr
+    win.beginNewProject()
+  }
+  function beginNewProject() {
+    if (!engine.newProject()) return
+    playTimer.stop()
+    if (win.playerRef) { win.playerRef.stop(); win.playerRef.source = "" }
+    win.current = null
+    win.primaryAudioEnabled = true
+    win.videoPath = ""
+    win.cutPath = ""
+    win.layers = []
+    win.touchLayers()
+    win.blocks = []
+    win.blocksRev = (win.blocksRev + 1) % 2000000000
+    win.selectedLayer = -1
+    win.selectedBlock = -1
+    win.srtPath = ""
+    win.subtitleMode = "normal"
+    win.subtitleStatus = ""
+    win.stripUrls = []
+    win.stripFor = ""
+    win.trimIn = 0
+    win.trimOut = 1
+    win.tplIndex = 0
+    win.regionX = 0; win.regionY = 0; win.regionW = 100; win.regionH = 100
+    win.apilarTop = ({ x: 0, y: 0, w: 100, h: 50 })
+    win.apilarBottom = ({ x: 0, y: 50, w: 100, h: 50 })
+    win.split = 0.5
+    win.fgRegion = ({ x: 25, y: 25, w: 50, h: 50 })
+    win.pipFx = 0.5; win.pipFy = 0.72
+    win.lock916 = false
+    win.editRegions = false
+    win.loop = false
+    win.srcW = 1920; win.srcH = 1080
+    win.pathHints = ({})
+    win.fmtV = true; win.fmtH = false
+    win.renderCodecIdx = 0; win.renderQualIdx = 1
+    win.view = "edit"
+    win.lastSavedStr = JSON.stringify(win.projectDoc())
+  }
+  function clearMainVideoState() {
+    playTimer.stop()
+    if (win.playerRef) { win.playerRef.stop(); win.playerRef.source = "" }
+    win.current = null
+    win.videoPath = ""
+    win.cutPath = ""
+    win.stripUrls = []
+    win.stripFor = ""
+  }
+  function clearTimelineVideo() {
+    win.clearMainVideoState()
+    win.trimIn = 0
+    win.trimOut = 1
+    win.blocks = []
+    win.blocksRev = (win.blocksRev + 1) % 2000000000
+    win.selectedBlock = -1
+    var doc = win.projectDoc()
+    if (engine.saveProject(doc)) win.lastSavedStr = JSON.stringify(doc)
+  }
+  function requestSourceDelete(path, title) {
+    deleteConfirmDialog.deleteKind = "source"
+    deleteConfirmDialog.targetPath = path
+    deleteConfirmDialog.targetName = title || path.split("/").pop()
+    deleteConfirmDialog.open()
+  }
+  function requestTimelineDelete() {
+    if (!win.current && win.cutPath === "") return
+    deleteConfirmDialog.deleteKind = "timeline"
+    deleteConfirmDialog.targetPath = win.current ? win.current.path : win.cutPath
+    deleteConfirmDialog.targetName = win.current ? win.current.title : win.cutPath.split("/").pop()
+    deleteConfirmDialog.open()
+  }
+  function confirmDelete() {
+    if (deleteConfirmDialog.deleteKind === "timeline") {
+      win.clearTimelineVideo()
+      return
+    }
+    if (engine.removeSource(deleteConfirmDialog.targetPath)) win.refreshSources()
+  }
   function refreshSources() {
     sources = engine.scanMedia()
     for (var i = 0; i < sources.length; i++) engine.requestThumb(sources[i].path)
+  }
+  function importVideos(fileUrls, addAsLayers) {
+    var imported = []
+    for (var i = 0; i < fileUrls.length; i++) {
+      var path = engine.importVideo(fileUrls[i])
+      if (path !== "" && imported.indexOf(path) < 0) imported.push(path)
+    }
+    win.refreshSources()
+    if (addAsLayers) {
+      for (var j = 0; j < imported.length; j++) win.addLayer("video", imported[j])
+    } else if (!win.current && imported.length > 0) {
+      win.selectMainVideo(imported[0], imported[0].split("/").pop())
+    }
   }
   function refreshOutputs() {
     outputs = engine.listOutputs()
@@ -449,6 +642,42 @@ ApplicationWindow {
     trimIn = 0
     if (stripFor !== path) { stripUrls = []; stripFor = path; engine.requestStrip(path) }
     playTimer.restart()
+  }
+  function sourceForPath(path, title) {
+    for (var i = 0; i < win.sources.length; i++)
+      if (win.sources[i].path === path) return win.sources[i]
+    var probe = engine.probeVideo(path)
+    return { id: path, path: path, title: title || path.split("/").pop(),
+             duration: probe.duration || 0, width: probe.width || 0, height: probe.height || 0 }
+  }
+  function selectMainVideo(path, title) {
+    win.current = win.sourceForPath(path, title)
+    win.cutPath = ""
+    win.trimIn = 0
+    win.trimOut = win.current.duration > 0 ? win.current.duration : 1e9
+    win.blocks = []
+    win.blocksRev = (win.blocksRev + 1) % 2000000000
+    win.selectedBlock = -1
+    win.loadVideo(path)
+  }
+  function requestMainVideo(path, title) {
+    if (!path) return
+    if (win.current && win.current.path === path) return
+    if (!win.current) {
+      win.selectMainVideo(path, title)
+      return
+    }
+    replaceVideoDialog.targetPath = path
+    replaceVideoDialog.targetName = title || path.split("/").pop()
+    replaceVideoDialog.open()
+  }
+  function confirmMainVideoReplacement() {
+    win.selectMainVideo(replaceVideoDialog.targetPath, replaceVideoDialog.targetName)
+    replaceVideoDialog.close()
+  }
+  function addPendingMainVideoAsLayer() {
+    win.addLayer("video", replaceVideoDialog.targetPath)
+    replaceVideoDialog.close()
   }
   Timer { id: playTimer; interval: 250; onTriggered: if (playerRef) playerRef.play() }
 
@@ -513,22 +742,67 @@ ApplicationWindow {
     win.touchLayers()
     win.subtitleStatus = win.tt("subtitleReady")
   }
+  function fittedLayerSize(mediaAspect, canvasAspect) {
+    var maxW = 0.45, maxH = 0.45
+    var aspect = mediaAspect > 0 ? mediaAspect : 16 / 9
+    var width = maxW
+    var height = width * canvasAspect / aspect
+    if (height > maxH) { height = maxH; width = height * aspect / canvasAspect }
+    return { w: width, h: height }
+  }
+  function normalizeVideoLayerAspect(layer, programAspect) {
+    layer = Object.assign({}, layer)
+    if (layer.type !== "video" || layer.sourceAspect > 0 || !layer.path) return layer
+    var probe = engine.probeVideo(layer.path)
+    if (!(probe.width > 0 && probe.height > 0)) return layer
+    var mediaAspect = probe.width / probe.height
+    layer.w = layer.w !== undefined ? layer.w : 0.35
+    layer.h = layer.w * (9 / 16) / mediaAspect
+    if (layer.h > 0.9) { layer.h = 0.9; layer.w = layer.h * mediaAspect / (9 / 16) }
+    layer.pw = layer.pw !== undefined ? layer.pw : layer.w
+    layer.ph = layer.pw * programAspect / mediaAspect
+    if (layer.ph > 0.9) { layer.ph = 0.9; layer.pw = layer.ph * mediaAspect / programAspect }
+    layer.sourceAspect = mediaAspect
+    return layer
+  }
+  function outputHeightForWidth(layer, width) {
+    return layer.type === "video" && layer.sourceAspect > 0
+        ? width * (9 / 16) / layer.sourceAspect : width * 0.56
+  }
   function addLayer(type, path) {
     var l = win.layers.slice()
     if (type === "text")
       l.push({ type: "text", text: "", x: 0.5, y: 0.15, size: 90, opacity: 1, fadeIn: 0, fadeOut: 0, color: "#ffffff", font: "", inS: win.trimIn, outS: win.trimOut })
-    else
+    else if (type === "video") {
+      var probe = engine.probeVideo(path)
+      var mediaAspect = probe.width > 0 && probe.height > 0 ? probe.width / probe.height : 16 / 9
+      var outputSize = win.fittedLayerSize(mediaAspect, 9 / 16)
+      var programSize = win.fittedLayerSize(mediaAspect, win.srcW / Math.max(1, win.srcH))
+      l.push({ type: "video", path: path || "", text: "", shape: "rect", sourceIn: win.trimIn, sourceOut: win.trimOut, audioEnabled: true, audioOffset: 0, audioVolume: 1,
+               x: 0.5, y: 0.5, w: outputSize.w, h: outputSize.h,
+               px: 0.5, py: 0.5, pw: programSize.w, ph: programSize.h,
+               sourceAspect: mediaAspect,
+               size: 90, opacity: 1, fadeIn: 0, fadeOut: 0, color: "#ffffff", font: "",
+               inS: win.trimIn, outS: win.trimOut })
+    } else
       l.push({ type: type, path: path || "", text: "", x: 0.5, y: 0.5, w: 0.35, h: 0.20, size: 90, opacity: 1, fadeIn: 0, fadeOut: 0, color: "#ffffff", font: "", inS: win.trimIn, outS: win.trimOut })
     win.layers = l
     win.selectedLayer = l.length - 1
+    win.touchLayers()
+  }
+  function createClipFromPrimarySelection() {
+    var src = win.renderSource()
+    if (src === "" || win.trimOut - win.trimIn <= 0.1) return
+    win.addLayer("video", src)
+    win.touchLayers()
   }
 
   Component.onCompleted: {
     normalizeFr()
     refreshSources(); refreshOutputs()
-    if (sources.length > 0) { win.current = sources[0]; loadVideo(sources[0].path) }
     var proj = engine.loadProject()
     if (proj && proj.version) { applyProject(proj); lastSavedStr = JSON.stringify(win.projectDoc()) }
+    else if (sources.length > 0) { win.current = sources[0]; loadVideo(sources[0].path) }
     if (typeof uitest !== "undefined" && uitest) uitestTimer.restart()
   }
 
@@ -539,7 +813,7 @@ ApplicationWindow {
       win.layers = [
         // dual-format: output 9:16 top-center, program/source bottom-left
         { type: "text", text: "Título de prueba", x: 0.5, y: 0.15, px: 0.15, py: 0.85, size: 90, color: "#ff9e64", font: "", inS: 5, outS: 10 },
-        { type: "text", text: "Omareel 🔥", x: 0.5, y: 0.85, px: 0.5, py: 0.15, size: 60, color: "#9ece6a", font: "", inS: 6, outS: 9 }
+        { type: "text", text: "OmaShort 🔥", x: 0.5, y: 0.85, px: 0.5, py: 0.15, size: 60, color: "#9ece6a", font: "", inS: 6, outS: 9 }
       ]
       win.selectedLayer = 0
       if (typeof uitestOut !== "undefined" && uitestOut) { win.view = "out"; win.refreshOutputs(); return }
@@ -581,15 +855,19 @@ ApplicationWindow {
     target: win.playerRef
     function onPositionChanged() {
       var t = playerRef.position / 1000
+      if (win.loop && win.blocks.length) {
+        win.enforceVisibleLoop()
+        if (win.loopVisibleAt(t) < 0) return
+      }
       if (win.blocks.length) { var bi = win.playheadBlock(); if (bi >= 0 && bi !== win.selectedBlock) win.selectedBlock = bi }
       // rewind BEFORE EndOfMedia: reaching the Stopped state clears the
       // VideoOutput (black monitor), so keep a safety margin
       if (playerRef.duration > 0 && t >= durS() - 0.25) {
-        if (win.loop) { playerRef.position = Math.round(win.trimIn * 1000); if (playerRef.playbackState !== MediaPlayer.PlayingState) playerRef.play() }
+        if (win.loop) { playerRef.position = Math.round(win.loopRestartPosition() * 1000); if (playerRef.playbackState !== MediaPlayer.PlayingState) playerRef.play() }
         return
       }
       if (win.loop && playerRef.playbackState === MediaPlayer.PlayingState && t >= win.trimOut - 0.03)
-        playerRef.position = Math.round(win.trimIn * 1000)
+        playerRef.position = Math.round(win.loopRestartPosition() * 1000)
       if (playerRef.duration > 0 && win.trimOut > durS()) win.trimOut = durS()
     }
     function onDurationChanged() { if (win.trimOut <= 0.2 || win.trimOut > durS()) win.trimOut = durS() }
@@ -610,6 +888,12 @@ ApplicationWindow {
   Timer {
     id: endPauseTimer; interval: 90
     onTriggered: if (playerRef && playerRef.playbackState === MediaPlayer.PlayingState) win.pausePlayback()
+  }
+  Timer {
+    id: visibleLoopTimer; interval: 40
+    running: win.loop && win.blocks.length > 0 && win.playerRef && win.playerRef.playbackState === MediaPlayer.PlayingState
+    repeat: true
+    onTriggered: win.enforceVisibleLoop()
   }
 
   Connections {
@@ -695,18 +979,9 @@ ApplicationWindow {
     spacing: 8
     NleButton { text: "⬆ " + win.tt("importVideo"); Layout.fillWidth: true; onClicked: importDialog.open() }
     FileDialog {
-      id: importDialog; fileMode: FileDialog.OpenFile
+      id: importDialog; fileMode: FileDialog.OpenFiles
       nameFilters: ["Video (*.mp4 *.mkv *.mov *.webm)"]
-      onAccepted: {
-        var imported = engine.importVideo(selectedFile)
-        win.refreshSources()
-        if (imported !== "") {
-          for (var i = 0; i < win.sources.length; i++)
-            if (win.sources[i].path === imported) { win.current = win.sources[i]; break }
-          win.cutPath = ""
-          win.loadVideo(imported)
-        }
-      }
+      onAccepted: win.importVideos(selectedFiles, false)
     }
     ListView {
       Layout.fillWidth: true; Layout.fillHeight: true
@@ -717,7 +992,7 @@ ApplicationWindow {
         color: win.current && win.current.path === modelData.path ? engine.theme.accentSoft : (hov.containsMouse ? "#272c42" : engine.theme.panelAlt)
         border.color: win.current && win.current.path === modelData.path ? engine.theme.accent : engine.theme.borderSoft
         RowLayout {
-          anchors.fill: parent; anchors.margins: 6; spacing: 8
+          anchors.fill: parent; anchors.margins: 6; anchors.rightMargin: 74; spacing: 8
           Image {
             Layout.preferredWidth: 76; Layout.preferredHeight: 44
             source: modelData.thumb || ""; fillMode: Image.PreserveAspectCrop
@@ -728,27 +1003,34 @@ ApplicationWindow {
             Label { text: win.fmtDur(modelData.duration) + " · " + win.fmtSize(modelData.size); color: engine.theme.textMuted; font.pixelSize: 9; font.family: engine.theme.fontMono }
           }
         }
-        MouseArea { id: hov; anchors.fill: parent; hoverEnabled: true; onClicked: { win.current = modelData; win.cutPath = ""; loadVideo(modelData.path) } }
+        MouseArea { id: hov; anchors.fill: parent; hoverEnabled: true; onClicked: win.requestMainVideo(modelData.path, modelData.title) }
+        IconBtn { anchors.right: parent.right; anchors.rightMargin: 38; anchors.verticalCenter: parent.verticalCenter; z: 2; glyph: "+"; tip: win.tt("addSourceAsLayer"); onClicked: win.addLayer("video", modelData.path) }
+        IconBtn { anchors.right: parent.right; anchors.rightMargin: 6; anchors.verticalCenter: parent.verticalCenter; z: 2; glyph: "×"; tip: win.tt("deleteSource"); onClicked: win.requestSourceDelete(modelData.path, modelData.title) }
       }
       Label { visible: win.sources.length === 0; text: win.tt("noSources"); color: engine.theme.textDim; wrapMode: Text.WordWrap; width: parent ? parent.width - 16 : 200 }
     }
   }
 
   component ProgramContent: ColumnLayout {
+    id: programContent
     spacing: 6
     Component.onCompleted: if (panelBox && panelBox.modelData === "program") win.playerRef = player
     Component.onDestruction: if (win.playerRef === player) win.playerRef = null
     Rectangle {
       Layout.fillWidth: true; Layout.fillHeight: true; color: "#000"; radius: 4; clip: true
       border.color: engine.theme.borderSoft
-      VideoOutput { id: videoOut; anchors.fill: parent }
+      VideoOutput {
+        id: videoOut; anchors.fill: parent
+        visible: !win.blocks.length || win.loopVisibleAt(player.position / 1000) >= 0
+      }
       Label { anchors.centerIn: parent; visible: !player.source.toString(); text: win.tt("preview"); color: engine.theme.textDim }
       MediaPlayer { id: player; videoOutput: videoOut }
       OverlayLayers {
         // pinned to the video frame: program-space fractions map to source pixels
         x: videoOut.contentRect.x; y: videoOut.contentRect.y
         width: videoOut.contentRect.width; height: videoOut.contentRect.height
-        visible: videoOut.contentRect.width > 4 && videoOut.contentRect.height > 4
+        visible: videoOut.visible && videoOut.contentRect.width > 4 && videoOut.contentRect.height > 4
+        active: programContent.visible
         layers: { win.layersRev; return win.layers.slice() }
         space: "prog"
         rev: win.layersRev
@@ -817,7 +1099,8 @@ ApplicationWindow {
         Item { Layout.fillWidth: true }
         NleButton { text: "⟨ I"; tip: "Marcar entrada (I)"; onClicked: win.trimIn = player.position / 1000 }
         NleButton { text: "O ⟩"; tip: "Marcar salida (O)"; onClicked: win.trimOut = player.position / 1000 }
-        NleButton { text: "✂B"; tip: "Split block at playhead"; onClicked: win.splitBlockAt(player.position / 1000) }
+        NleButton { text: "✂B"; tip: "Cut selected media at playhead"; onClicked: win.cutSelectedAt(player.position / 1000) }
+        NleButton { text: "⌫"; tip: "Delete selected clip"; enabled: win.selectedLayer >= 0 || win.selectedBlock >= 0; onClicked: win.deleteSelectedClip() }
         NleButton { text: "B−"; tip: "Clear blocks"; enabled: win.blocks.length > 0; onClicked: { win.blocks = []; win.selectedBlock = -1 } }
         NleButton { text: "✂ " + win.tt("makeCut"); accentBtn: true; onClicked: if (win.current) engine.cut(win.cutPath || win.current.path, win.trimIn, win.trimOut) }
       }
@@ -832,7 +1115,11 @@ ApplicationWindow {
       NleButton { text: "🖼…"; Layout.fillWidth: true; tip: win.tt("addImage"); onClicked: imgDialog.open() }
       NleButton { text: "🎬…"; Layout.fillWidth: true; tip: win.tt("addVideo"); onClicked: vidDialog.open() }
     }
-    FileDialog { id: vidDialog; fileMode: FileDialog.OpenFile; nameFilters: ["Video (*.mp4 *.mkv *.mov *.webm)"]; onAccepted: win.addLayer("video", String(selectedFile).replace("file://", "")) }
+    FileDialog {
+      id: vidDialog; fileMode: FileDialog.OpenFiles
+      nameFilters: ["Video (*.mp4 *.mkv *.mov *.webm)"]
+      onAccepted: win.importVideos(selectedFiles, true)
+    }
     FileDialog { id: gifDialog; fileMode: FileDialog.OpenFile; nameFilters: ["GIF (*.gif *.webp)"]; onAccepted: win.addLayer("gif", String(selectedFile).replace("file://", "")) }
     FileDialog { id: imgDialog; fileMode: FileDialog.OpenFile; nameFilters: ["Image (*.png *.jpg *.jpeg *.webp)"]; onAccepted: win.addLayer("image", String(selectedFile).replace("file://", "")) }
     RowLayout { Layout.fillWidth: true
@@ -916,7 +1203,7 @@ ApplicationWindow {
           }
           FnField {
             visible: card.expanded && modelData.type === "text"
-            Layout.fillWidth: true; placeholderText: win.tt("textPlaceholder"); text: modelData.text
+            Layout.fillWidth: true; placeholderText: win.tt("textPlaceholder"); text: modelData.text || ""
             // Keep the editor alive during in-place edits.
             onTextChanged: { win.layers[index].text = text; win.touchLayers() }
             onActiveFocusChanged: if (activeFocus) win.selectedLayer = index
@@ -926,7 +1213,7 @@ ApplicationWindow {
             FnSpin {
               from: modelData.type === "text" ? 20 : 5; to: modelData.type === "text" ? 300 : 100
               value: modelData.type === "text" ? card.animatedLayer.size : Math.round((card.animatedLayer.w || 0.35) * 100)
-              onValueModified: if (modelData.type === "text") win.patchLayer(index, { size: value }); else win.patchLayer(index, { w: value / 100, h: value / 100 * 0.56 })
+              onValueModified: if (modelData.type === "text") win.patchLayer(index, { size: value }); else { var width = value / 100; win.patchLayer(index, { w: width, h: win.outputHeightForWidth(modelData, width) }) }
             }
             Label { text: "y%"; color: engine.theme.textDim; font.pixelSize: 10 }
             FnSpin { from: 5; to: 95; value: Math.round(card.animatedLayer.y * 100); onValueModified: win.patchLayer(index, { y: value / 100 }) }
@@ -1063,6 +1350,13 @@ ApplicationWindow {
         text: { var b = win.activeBlock(); return "BLOQUE " + (win.selectedBlock + 1) + " · " + win.fmtDur(b ? b.end - b.start : 0) }
         color: engine.theme.orange; font.pixelSize: 9; font.bold: true
       }
+      NleButton {
+        visible: win.selectedBlock >= 0
+        Layout.fillWidth: true
+        text: { var b = win.activeBlock(); return b && b.visible === false ? "◉ " + win.tt("showBlock") : "◌ " + win.tt("hideBlock") }
+        tip: win.tt("blockVisibilityTip")
+        onClicked: win.toggleSelectedBlockVisibility()
+      }
       FnCombo { Layout.fillWidth: true; model: [win.tt("tplCompleta"), win.tt("tplApilar"), "PiP", "Círculo"]
         currentIndex: { var l = win.activeLayout(); return l === "apilar" ? 1 : (l === "pip" ? 2 : (l === "circulo" ? 3 : 0)) }
         onActivated: win.setBlockLayout(["completa", "apilar", "pip", "circulo"][currentIndex]) }
@@ -1107,8 +1401,10 @@ ApplicationWindow {
   }
 
   component OutputContent: Item {
+    id: outputContent
     OutputPreview {
       anchors.fill: parent; anchors.margins: 6
+      active: outputContent.visible
       videoPath: win.videoPath
       position: win.playerRef ? win.playerRef.position / 1000 : 0
       playing: win.playerRef ? win.playerRef.playbackState === MediaPlayer.PlayingState : false
@@ -1151,7 +1447,7 @@ ApplicationWindow {
             IconBtn { glyph: "▶"; tip: win.tt("playOutput"); onClicked: { win.view = "edit"; loadVideo(modelData.path) } }
             IconBtn { glyph: "📂"; tip: win.tt("openFolder"); onClicked: engine.openFolder(modelData.path) }
             Item { Layout.fillWidth: true }
-            IconBtn { glyph: "🗑"; tip: win.tt("deleteSource"); onClicked: { engine.deleteMedia(modelData.path); win.refreshOutputs() } }
+            IconBtn { glyph: "🗑"; tip: win.tt("deleteOutput"); onClicked: { engine.deleteMedia(modelData.path); win.refreshOutputs() } }
           }
         }
         MouseArea { id: oh2; anchors.fill: parent; hoverEnabled: true; z: -1 }
@@ -1166,7 +1462,7 @@ ApplicationWindow {
     Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: engine.theme.border }
     RowLayout {
       anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14
-      Label { text: "OMAREEL"; color: engine.theme.text; font.pixelSize: 14; font.bold: true; font.letterSpacing: 2 }
+      Label { text: "OMASHORT"; color: engine.theme.text; font.pixelSize: 14; font.bold: true; font.letterSpacing: 2 }
       Rectangle { width: 1; height: 18; color: engine.theme.border }
       Label { text: win.current ? win.current.title : ""; color: engine.theme.textMuted; font.pixelSize: 11; elide: Text.ElideMiddle; Layout.maximumWidth: 320 }
       Item { Layout.fillWidth: true }
@@ -1189,6 +1485,7 @@ ApplicationWindow {
       Item { Layout.fillWidth: true }
       Label { visible: win.view === "edit"; text: "␣ play · ←→ frame · I/O · L loop"; color: engine.theme.textDim; font.pixelSize: 10 }
       Item { Layout.fillWidth: true }
+      NleButton { text: "+ " + win.tt("newProject"); tip: engine.projectFile; onClicked: win.requestNewProject() }
       NleButton { text: "↥ " + win.tt("openProject"); tip: engine.projectFile; onClicked: projectOpenDialog.open() }
       NleButton { text: "⇩ " + win.tt("saveAs"); tip: engine.projectFile; onClicked: projectSaveDialog.open() }
       NleButton { text: "⊞ " + win.tt("panels"); onClicked: panelsPopup.open() }
@@ -1237,23 +1534,85 @@ ApplicationWindow {
   FileDialog {
     id: projectOpenDialog
     fileMode: FileDialog.OpenFile
-    nameFilters: ["Omareel project (*.json)"]
+    nameFilters: ["OmaShort project (*.json)"]
     onAccepted: {
       var doc = engine.openProjectFile(selectedFile)
       if (doc && doc.version) { win.applyProject(doc); win.lastSavedStr = JSON.stringify(win.projectDoc()) }
     }
   }
   FileDialog {
+    id: renderSaveDialog
+    fileMode: FileDialog.SaveFile
+    defaultSuffix: "mp4"
+    nameFilters: ["Video MP4 (*.mp4)"]
+    onAccepted: win.renderSelectedOutput(selectedFile)
+  }
+  FileDialog {
     id: projectSaveDialog
     fileMode: FileDialog.SaveFile
     defaultSuffix: "json"
-    nameFilters: ["Omareel project (*.json)"]
+    nameFilters: ["OmaShort project (*.json)"]
     onAccepted: {
       var doc = win.projectDoc(false)
       if (engine.saveProjectAs(selectedFile, doc)) {
         var saved = engine.openProjectFile(selectedFile)
         if (saved && saved.version) win.applyProject(saved)
         win.lastSavedStr = JSON.stringify(win.projectDoc())
+      }
+    }
+  }
+  Dialog {
+    id: deleteConfirmDialog
+    property string deleteKind: ""
+    property string targetPath: ""
+    property string targetName: ""
+    modal: true
+    closePolicy: Popup.NoAutoClose
+    title: win.tt("confirmDeleteTitle")
+    standardButtons: Dialog.Yes | Dialog.No
+    width: Math.min(460, win.width - 40)
+    x: Math.round((win.width - width) / 2)
+    y: Math.round((win.height - height) / 2)
+    onAccepted: win.confirmDelete()
+    contentItem: Label {
+      text: win.tt(deleteConfirmDialog.deleteKind === "source" ? "confirmDeleteSource" : "confirmDeleteTimeline")
+              .replace("%1", deleteConfirmDialog.targetName)
+      color: engine.theme.text
+      wrapMode: Text.WordWrap
+      font.pixelSize: 12
+    }
+  }
+  Dialog {
+    id: replaceVideoDialog
+    property string targetPath: ""
+    property string targetName: ""
+    modal: true
+    closePolicy: Popup.NoAutoClose
+    title: win.tt("confirmReplaceTitle")
+    width: Math.min(460, win.width - 40)
+    x: Math.round((win.width - width) / 2)
+    y: Math.round((win.height - height) / 2)
+    contentItem: Label {
+      text: win.tt("confirmReplaceVideo").replace("%1", replaceVideoDialog.targetName)
+      color: engine.theme.text
+      wrapMode: Text.WordWrap
+      font.pixelSize: 12
+    }
+    footer: DialogButtonBox {
+      Button {
+        text: win.tt("replaceMainAction")
+        DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+        onClicked: win.confirmMainVideoReplacement()
+      }
+      Button {
+        text: win.tt("addAsLayerAction")
+        DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+        onClicked: win.addPendingMainVideoAsLayer()
+      }
+      Button {
+        text: win.tt("cancel")
+        DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+        onClicked: replaceVideoDialog.close()
       }
     }
   }
@@ -1401,9 +1760,13 @@ ApplicationWindow {
       id: timeline
       snappingLabel: win.tt("snapping")
       snappingTip: win.tt("snappingTip")
+      videoPresent: win.current !== null || win.cutPath !== ""
+      primaryAudioEnabled: win.primaryAudioEnabled
+      deleteVideoLabel: win.tt("deleteTimelineVideo")
+      deleteVideoTip: win.tt("deleteTimelineVideo")
       visible: win.view === "edit"
       Layout.fillWidth: true
-      Layout.preferredHeight: win.tlHeight > 0 ? win.tlHeight : 216 + win.layers.length * 29
+      Layout.preferredHeight: win.tlHeight > 0 ? win.tlHeight : 216 + timeline.trackCount() * 29
       duration: Math.max(0.1, durS())
       position: playerRef ? playerRef.position / 1000 : 0
       trimIn: win.trimIn; trimOut: win.trimOut
@@ -1414,8 +1777,9 @@ ApplicationWindow {
       blocks: { win.blocksRev; return win.blocks.slice() }
       blocksRev: win.blocksRev
       selectedBlock: win.selectedBlock
+      onDeleteVideoRequested: win.requestTimelineDelete()
       onSeek: function (t) { if (playerRef) playerRef.position = Math.round(t * 1000); if (win.blocks.length) win.selectBlockAt(t) }
-      onBlockClicked: function (i) { win.selectedBlock = i }
+      onBlockClicked: function (i) { win.selectedBlock = i; win.selectedLayer = -1 }
       onBlockEdited: function (i, patch) {
         var cp = win.blocks; var b = cp[i]; if (!b) return
         if (patch.start !== undefined) b.start = patch.start
@@ -1427,6 +1791,11 @@ ApplicationWindow {
       }
       onTrimEdited: function (a, b) { win.trimIn = a; win.trimOut = b }
       onLayerEdited: function (i, a, b) { win.layers[i].inS = a; win.layers[i].outS = b; win.touchLayers() }
+      onAudioToggled: function (i) { win.patchLayer(i, { audioEnabled: win.layers[i].audioEnabled === false }) }
+      onAudioMoved: function (i, offset) { win.patchLayer(i, { audioOffset: Math.round(offset * 100) / 100 }) }
+      onPrimaryAudioToggled: { win.primaryAudioEnabled = !win.primaryAudioEnabled; win.touchLayers() }
+      onPrimaryClicked: { win.selectedLayer = -1; win.selectedBlock = -1 }
+      onCreatePrimaryClip: { win.createClipFromPrimarySelection() }
       onLayerClicked: function (i) { win.selectedLayer = i }
       onLayerMoved: function (from, to) {
         var l = win.layers.slice()

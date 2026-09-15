@@ -1,4 +1,4 @@
-"""Regression tests for Omareel's project-serializable layer keyframes."""
+"""Regression tests for OmaShort's project-serializable layer keyframes."""
 import os
 import json
 from pathlib import Path

@@ -1,6 +1,6 @@
 QT += quick multimedia
 CONFIG += c++17
-TARGET = omareel-native
+TARGET = omashort-native
 VERSION = 0.0.2
 TEMPLATE = app
 SOURCES += src/main.cpp src/engine.cpp

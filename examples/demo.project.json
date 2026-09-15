@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "app": "omareel",
-  "video": "assets/omareel-motion-source.mp4",
+  "app": "omashort",
+  "video": "assets/omashort-motion-source.mp4",
   "trim": { "in": 0, "out": 10 },
   "template": "apilar",
   "region": { "x": 0, "y": 0, "w": 100, "h": 100 },
@@ -14,7 +14,7 @@
   },
   "pip": { "fg": { "x": 25, "y": 25, "w": 50, "h": 50 }, "fx": 0.5, "fy": 0.72 },
   "layers": [
-    { "type": "text", "path": "", "text": "🎬 OMAREEL", "x": 0.5, "y": 0.12, "w": 0.9, "h": 0.12, "px": 0.5, "py": 0.12, "size": 120, "color": "#7dcfff", "font": "", "inS": 0, "outS": 600 },
+    { "type": "text", "path": "", "text": "🎬 OMASHORT", "x": 0.5, "y": 0.12, "w": 0.9, "h": 0.12, "px": 0.5, "py": 0.12, "size": 120, "color": "#7dcfff", "font": "", "inS": 0, "outS": 600 },
     { "type": "text", "path": "", "text": "✂️ Native Qt6 / QML editor", "x": 0.5, "y": 0.2, "w": 0.9, "h": 0.07, "px": 0.5, "py": 0.2, "size": 48, "color": "#ffffff", "font": "", "inS": 0, "outS": 8 },
     { "type": "text", "path": "", "text": "🔥", "x": 0.15, "y": 0.31, "w": 0.2, "h": 0.12, "px": 0.13, "py": 0.31, "size": 90, "color": "#ff9e64", "font": "", "inS": 1, "outS": 8.5 },
     { "type": "text", "path": "", "text": "💜", "x": 0.85, "y": 0.33, "w": 0.2, "h": 0.12, "px": 0.87, "py": 0.33, "size": 100, "color": "#bb9af7", "font": "", "inS": 0.5, "outS": 9 },

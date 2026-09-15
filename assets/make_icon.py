@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Omareel app icon (256x256 PNG) with Pillow."""
+"""Generate the OmaShort app icon (256x256 PNG) with Pillow."""
 from PIL import Image, ImageDraw
 
 S = 256
@@ -29,5 +29,5 @@ cx, cy = fx + fw // 2 + 6, fy + fh // 2
 r = 26
 d.polygon([(cx - r * 0.6, cy - r), (cx - r * 0.6, cy + r), (cx + r, cy)], fill=accent)
 
-img.save("assets/omareel.png")
-print("wrote assets/omareel.png")
+img.save("assets/omashort.png")
+print("wrote assets/omashort.png")

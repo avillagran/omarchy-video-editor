@@ -1,9 +1,9 @@
-# Omareel project format (`project.json`)
+# OmaShort project format (`project.json`)
 
-Single JSON file at `~/.local/share/omareel/project.json`. It is the ENTIRE editor
-state: any program (LLM, script, human) can edit it while Omareel is running and
+Single JSON file at `~/.local/share/omashort/project.json`. It is the ENTIRE editor
+state: any program (LLM, script, human) can edit it while OmaShort is running and
 the UI applies the changes live (~1 s, QFileSystemWatcher + hash guard against
-self-writes). Omareel also saves it automatically every ~1.5 s when something
+self-writes). OmaShort also saves it automatically every ~1.5 s when something
 changed, so manual edits should be quick or done while the user is not editing.
 
 Design goals: flat, obvious names, no ids unless needed, percentages 0-100 for
@@ -12,7 +12,7 @@ source-space coords, fractions 0-1 for frame-space coords, seconds for time.
 ```jsonc
 {
   "version": 1,
-  "app": "omareel",
+  "app": "omashort",
   "video": "/abs/path/source.mp4",        // absolute, or relative to this JSON
   "trim":  { "in": 5.0, "out": 10.0 },    // seconds, source timeline
   "template": "completa",                 // global layout when no blocks:
@@ -76,7 +76,8 @@ source-space coords, fractions 0-1 for frame-space coords, seconds for time.
 
 ## Rules for AI editors
 
-- Keep `version: 1` and `app: "omareel"`.
+- Keep `version: 1` and `app: "omashort"`. Projects using the retired
+  `app: "omareel"` value remain readable for compatibility.
 - Unknown keys are ignored; missing keys keep their current values.
 - Write the file atomically (temp + rename) or in one `write()` — partial JSON
   is ignored (parse fails, no crash).

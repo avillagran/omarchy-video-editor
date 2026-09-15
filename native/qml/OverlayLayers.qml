@@ -16,6 +16,7 @@ import "Keyframes.js" as Keyframes
 
 Item {
   id: ov
+  property bool active: true      // false for inactive dock copies: do not open decoders
   property var layers: []
   property int rev: 0           // in-place edit revision (see header)
   property real position: 0      // seconds
@@ -36,6 +37,24 @@ Item {
 
   // identification frame: the layer's own color wins over the theme default
   function frameColor(l, fallback) { return l.color ? l.color : fallback }
+  function syncLayerPlayer(pl, l) {
+    if (pl.duration <= 0) return
+    var target = Math.max(0, (l.sourceIn || 0) + ov.position - (l.inS || 0))
+    if (Math.abs(pl.position / 1000 - target) > 0.3)
+      pl.position = Math.round(target * 1000)
+    // A stopped pipeline paints no frame after a seek. Preroll once; the next
+    // tick pauses it while preserving the decoded frame.
+    if (pl.playbackState === MediaPlayer.StoppedState) {
+      pl.play()
+      return
+    }
+    if (ov.playing) {
+      if (pl.playbackState !== MediaPlayer.PlayingState) pl.play()
+    } else if (pl.playbackState === MediaPlayer.PlayingState) {
+      pl.pause()
+      pl.position = pl.position + 1
+    }
+  }
 
   // shared drag logic: grab offset so the element doesn't jump to the cursor.
   // Writes to the coordinate set of the space this instance is showing.
@@ -130,39 +149,28 @@ Item {
         border.width: 2
         border.color: { ov.rev; return ov.frameColor(ld.modelData, engine.theme.magenta) }
         // shape: rect | rounded | circle (mask via Qt 6 MultiEffect)
-        Item {
-          id: lvContent
+        VideoOutput {
+          id: lvOut
           anchors.fill: parent
-          visible: false   // rendered offscreen by MultiEffect
-          VideoOutput { id: lvOut; anchors.fill: parent }
+          layer.enabled: (modelData.shape || "rect") !== "rect"
+          layer.effect: MultiEffect {
+            maskEnabled: true
+            autoPaddingEnabled: false
+            maskSource: { ov.rev; return (modelData.shape || "rect") === "circle" ? lvMaskCircle : lvMaskRound }
+          }
         }
         Rectangle { id: lvMaskRect; visible: false; width: parent.width; height: parent.height; radius: 4; color: "#fff" }
         Rectangle { id: lvMaskRound; visible: false; width: parent.width; height: parent.height; radius: Math.min(width, height) * 0.12; color: "#fff" }
         Rectangle { id: lvMaskCircle; visible: false; width: parent.width; height: parent.height; radius: Math.min(width, height) / 2; color: "#fff" }
-        MultiEffect {
-          anchors.fill: parent
-          source: lvContent
-          maskEnabled: true
-          autoPaddingEnabled: false
-          maskSource: { ov.rev; return (modelData.shape || "rect") === "circle" ? lvMaskCircle
-                    : (modelData.shape === "rounded" ? lvMaskRound : lvMaskRect) }
-        }
         MediaPlayer {
           id: lvPlayer
           videoOutput: lvOut
-          source: { ov.rev; return modelData.type === "video" && modelData.path ? "file://" + modelData.path : "" }
+          source: { ov.rev; return ov.active && modelData.type === "video" && modelData.path ? "file://" + modelData.path : "" }
           loops: MediaPlayer.Infinite
         }
         Timer {
-          interval: 120; running: ld.visible; repeat: true
-          onTriggered: {
-            if (lvPlayer.duration <= 0) return
-            var target = Math.max(0, ov.position - (modelData.inS || 0))
-            if (Math.abs(lvPlayer.position / 1000 - target) > 0.3)
-              lvPlayer.position = Math.round(target * 1000)
-            if (ov.playing) { if (lvPlayer.playbackState !== MediaPlayer.PlayingState) lvPlayer.play() }
-            else lvPlayer.pause()
-          }
+          interval: 120; running: ov.active && ld.visible; repeat: true
+          onTriggered: ov.syncLayerPlayer(lvPlayer, modelData)
         }
         DragArea { layerIndex: ld.index }
       }

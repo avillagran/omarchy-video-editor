@@ -40,7 +40,7 @@ class TrimDragTest(unittest.TestCase):
         self.component.setData(b'''import QtQuick
 import "../qml"
 Timeline {
-    width: 1048; height: 220
+    width: 1080; height: 220
     duration: 20; zoom: 50; trimIn: 4; trimOut: 8
     onTrimEdited: function(a, b) { trimIn = a; trimOut = b }
 }''', QUrl.fromLocalFile(str(qml_dir.parent / "tests" / "Harness.qml")))
@@ -61,7 +61,7 @@ Timeline {
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
     def drag(self, start_time, delta, button=Qt.RightButton):
-        x = 47 + round(start_time * 50)
+        x = self.timeline.property("headW") + 1 + round(start_time * 50)
         y = 1 + 24 + 26 + 28
         QTest.mousePress(self.view, button, Qt.NoModifier, QPoint(x, y))
         for step in range(1, 6):
@@ -106,10 +106,11 @@ Timeline {
 
     def test_right_drag_returns_from_boundary_without_offset_drift(self):
         y = 79
-        QTest.mousePress(self.view, Qt.RightButton, Qt.NoModifier, QPoint(447, y))
-        for x in (647, 847, 1047, 747, 547):
+        base = self.timeline.property("headW") + 1
+        QTest.mousePress(self.view, Qt.RightButton, Qt.NoModifier, QPoint(base + 400, y))
+        for x in (base + 600, base + 800, base + 1000, base + 700, base + 500):
             QTest.mouseMove(self.view, QPoint(x, y), 20)
-        QTest.mouseRelease(self.view, Qt.RightButton, Qt.NoModifier, QPoint(547, y))
+        QTest.mouseRelease(self.view, Qt.RightButton, Qt.NoModifier, QPoint(base + 500, y))
         self.assertAlmostEqual(self.timeline.property("trimIn"), 6, places=2)
         self.assertAlmostEqual(self.timeline.property("trimOut"), 10, places=2)
 
