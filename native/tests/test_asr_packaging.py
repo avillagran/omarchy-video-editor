@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 
 SOURCE = (Path(__file__).resolve().parents[1] / "src" / "engine.cpp").read_text()
-PROJECT = (Path(__file__).resolve().parents[1] / "omareel-native.pro").read_text()
+PROJECT = (Path(__file__).resolve().parents[1] / "omashort-native.pro").read_text()
 MAIN = (Path(__file__).resolve().parents[1] / "src" / "main.cpp").read_text()
 
 

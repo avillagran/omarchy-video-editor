@@ -1,4 +1,4 @@
-// Theme.js - Omareel Native design tokens (Omarchy / Tokyo Night)
+// Theme.js - OmaShort Native design tokens (Omarchy / Tokyo Night)
 .pragma library
 
 var app = "#1a1b26"          // window background

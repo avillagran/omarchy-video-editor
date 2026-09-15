@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline faster-whisper transcription for Omareel.
+"""Offline faster-whisper transcription for OmaShort.
 
 Usage: transcribe_local.py MODEL CLIP OUTPUT.srt LANGUAGE
 The model path must be a local CTranslate2 Whisper snapshot. No network access

@@ -8,6 +8,7 @@ import "Theme.js" as T
 
 Item {
   id: op
+  property bool active: true
   property string videoPath: ""
   property real position: 0            // seconds (sync target)
   property bool playing: true          // mirrors the main player
@@ -31,9 +32,9 @@ Item {
   readonly property bool isPip: layout === "pip" || layout === "circulo"
 
   // one shared player per view (created once, never destroyed — avoids load races)
-  MediaPlayer { id: pMain; source: op.videoPath ? "file://" + op.videoPath : ""; videoOutput: vMain }
-  MediaPlayer { id: pBot;  source: op.videoPath ? "file://" + op.videoPath : ""; videoOutput: vBot }
-  MediaPlayer { id: pFg;   source: op.videoPath ? "file://" + op.videoPath : ""; videoOutput: vFg }
+  MediaPlayer { id: pMain; source: op.active && op.videoPath ? "file://" + op.videoPath : ""; videoOutput: vMain }
+  MediaPlayer { id: pBot;  source: op.active && op.videoPath ? "file://" + op.videoPath : ""; videoOutput: vBot }
+  MediaPlayer { id: pFg;   source: op.active && op.videoPath ? "file://" + op.videoPath : ""; videoOutput: vFg }
 
   function syncPlayer(pl) {
     if (pl.duration <= 0) return
@@ -50,7 +51,7 @@ Item {
     }
   }
   Timer {
-    interval: 120; running: op.visible && op.videoPath !== ""; repeat: true
+    interval: 120; running: op.active && op.visible && op.videoPath !== ""; repeat: true
     onTriggered: { op.syncPlayer(pMain); op.syncPlayer(pBot); op.syncPlayer(pFg) }
   }
 
@@ -167,6 +168,7 @@ Item {
           z: 10
           OverlayLayers {
             anchors.fill: parent; layers: op.layers; position: op.position; playing: op.playing
+            active: op.active
             space: "out"; refH: 1920; rev: op.layersRev
             onLayerMoved: function (i, patch) { op.layerMoved(i, patch) }
             onLayerPressed: function (i) { op.layerPressed(i) }

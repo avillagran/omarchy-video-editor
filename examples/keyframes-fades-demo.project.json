@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "app": "omareel",
-  "video": "assets/omareel-motion-source.mp4",
+  "app": "omashort",
+  "video": "assets/omashort-motion-source.mp4",
   "trim": { "in": 0, "out": 10 },
   "template": "completa",
   "region": { "x": 34.1797, "y": 0, "w": 31.6406, "h": 100 },
@@ -19,7 +19,7 @@
   },
   "layers": [
     {
-      "type": "text", "text": "OMAREEL", "x": 0.5, "y": 0.12,
+      "type": "text", "text": "OMASHORT", "x": 0.5, "y": 0.12,
       "px": 0.5, "py": 0.1, "size": 150, "opacity": 1,
       "color": "#7dcfff", "font": "", "inS": 0, "outS": 10,
       "fadeIn": 0.6, "fadeOut": 0.7,

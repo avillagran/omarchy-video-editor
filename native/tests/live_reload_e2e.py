@@ -20,13 +20,13 @@ def main():
     parser.add_argument('--video', required=True)
     parser.add_argument('--platform', choices=['offscreen', 'wayland'], default='offscreen')
     args = parser.parse_args()
-    data = Path(tempfile.mkdtemp(prefix='omareel-live-reload-'))
+    data = Path(tempfile.mkdtemp(prefix='omashort-live-reload-'))
     (data / 'media').mkdir()
     video = Path(args.video).resolve()
     assert video.is_file()
     (data / 'media' / video.name).symlink_to(video)
     doc = {
-        'version': 1, 'app': 'omareel', 'video': str(data / 'media' / video.name),
+        'version': 1, 'app': 'omashort', 'video': str(data / 'media' / video.name),
         'trim': {'in': 0, 'out': 10}, 'template': 'completa',
         'region': {'x': 0, 'y': 0, 'w': 100, 'h': 100},
         'layers': [{'type': 'text', 'text': 'LLM BASE', 'color': '#ffcc00',
@@ -37,7 +37,7 @@ def main():
     }
     project = data / 'project.json'
     project.write_text(json.dumps(doc))
-    env = dict(os.environ, OMAREEL_DATA=str(data), QT_QPA_PLATFORM=args.platform)
+    env = dict(os.environ, OMASHORT_DATA=str(data), QT_QPA_PLATFORM=args.platform)
     if args.platform == 'offscreen':
         env['QT_QUICK_BACKEND'] = 'software'
     else:

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="cl.villagranquiroz.omareel"
+    package="cl.villagranquiroz.omashort"
     android:installLocation="auto"
     android:versionCode="2"
     android:versionName="0.0.2">
@@ -16,7 +16,7 @@
         android:allowBackup="false"
         android:fullBackupOnly="false"
         android:hardwareAccelerated="true"
-        android:label="OMAREEL">
+        android:label="OmaShort">
 
         <activity
             android:name="org.qtproject.qt.android.bindings.QtActivity"
@@ -28,7 +28,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <meta-data android:name="android.app.lib_name" android:value="omareel-native" />
+            <meta-data android:name="android.app.lib_name" android:value="omashort-native" />
             <meta-data android:name="android.app.arguments" android:value="" />
         </activity>
 

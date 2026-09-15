@@ -20,6 +20,10 @@ Item {
   property bool snappingEnabled: true
   property string snappingLabel: "Magnetic snapping"
   property string snappingTip: "Snap clip edges to the playhead and other boundaries. Hold Alt to bypass."
+  property bool videoPresent: true
+  property bool primaryAudioEnabled: true
+  property string deleteVideoLabel: "Remove video"
+  property string deleteVideoTip: "Remove the video from the timeline"
 
   signal seek(real t)
   signal trimEdited(real a, real b)
@@ -28,6 +32,12 @@ Item {
   signal blockClicked(int index)
   signal blockEdited(int index, var patch)
   signal layerMoved(int from, int to)
+  signal audioToggled(int index)
+  signal audioMoved(int index, real offset)
+  signal primaryAudioToggled()
+  signal primaryClicked()
+  signal createPrimaryClip()
+  signal deleteVideoRequested()
   property int dragHeaderFrom: -1
   property int dragHeaderOver: -1
 
@@ -35,7 +45,28 @@ Item {
     var m = Math.floor(t / 60), s = Math.floor(t % 60), ds = Math.floor((t % 1) * 10)
     return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0") + "." + ds
   }
+  function layerTrackLabel(index) {
+    var type = layers[index] && layers[index].type ? layers[index].type : "text"
+    var prefix = type === "video" ? "V" : (type === "text" ? "T" : "G")
+    var number = type === "video" ? 1 : 0
+    for (var i = 0; i <= index; i++) {
+      var candidate = layers[i] && layers[i].type ? layers[i].type : "text"
+      if (candidate === type) number++
+    }
+    if (type === "video") return "V" + number
+    return prefix + number
+  }
   function fitPps() { return Math.max(1, (flick.width - 2) / duration) }
+  function trackCount() {
+    var n = tl.videoPresent ? 2 : 0
+    for (var i = 0; i < layers.length; i++) n += layers[i] && layers[i].type === "video" ? 2 : 1
+    return n
+  }
+  function trackOffset(index) {
+    var n = 0
+    for (var i = 0; i < index; i++) n += layers[i] && layers[i].type === "video" ? 2 : 1
+    return n
+  }
   function pps() { return zoom > 0 ? zoom : fitPps() }
   function t2x(t) { return t * pps() }
   function x2t(x) { return Math.max(0, Math.min(duration, x / pps())) }
@@ -74,7 +105,7 @@ Item {
     flick.contentX = Math.max(0, Math.min(flick.contentWidth - flick.width, anchorT * pps() - ax))
   }
 
-  readonly property int headW: 46
+  readonly property int headW: 78
   readonly property int rulerH: 24
   readonly property int stripH: 56
   readonly property int layerH: 28
@@ -103,46 +134,83 @@ Item {
       Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: engine.theme.border }
     }
     Rectangle {  // V1
-      x: 0; y: tl.rulerH + tl.blockH; width: parent.width; height: tl.stripH; color: engine.theme.panelAlt
+      x: 0; y: tl.rulerH + tl.blockH; width: parent.width; height: tl.stripH + (tl.videoPresent ? tl.layerH : 0); color: engine.theme.panelAlt
       Label { anchors.horizontalCenter: parent.horizontalCenter; y: 5; text: "V1"; color: engine.theme.textMuted; font.bold: true; font.pixelSize: 11 }
-      ToolButton {
-        id: snapButton
-        objectName: "snappingToggle"
+      Row {
         anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
-        width: 44; height: 27
-        text: "Snap"; font.pixelSize: 10
-        checkable: true; checked: tl.snappingEnabled
-        focusPolicy: Qt.StrongFocus
-        Accessible.name: tl.snappingLabel
-        Accessible.description: tl.snappingTip
-        ToolTip.visible: hovered
-        ToolTip.text: tl.snappingTip
-        contentItem: Text {
-          text: snapButton.text; font: snapButton.font
-          horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-          color: snapButton.checked ? engine.theme.accent : engine.theme.textMuted
+        spacing: 2
+        ToolButton {
+          id: snapButton
+          objectName: "snappingToggle"
+          width: 44; height: 27
+          text: "Snap"; font.pixelSize: 10
+          checkable: true; checked: tl.snappingEnabled
+          focusPolicy: Qt.StrongFocus
+          Accessible.name: tl.snappingLabel
+          Accessible.description: tl.snappingTip
+          ToolTip.visible: hovered
+          ToolTip.text: tl.snappingTip
+          contentItem: Text {
+            text: snapButton.text; font: snapButton.font
+            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+            color: snapButton.checked ? engine.theme.accent : engine.theme.textMuted
+          }
+          background: Rectangle {
+            radius: 3
+            color: snapButton.checked ? engine.theme.accentSoft : engine.theme.panelDeep
+            border.color: snapButton.activeFocus || snapButton.checked ? engine.theme.accent : engine.theme.border
+          }
+          onToggled: tl.snappingEnabled = checked
         }
-        background: Rectangle {
-          radius: 3
-          color: snapButton.checked ? engine.theme.accentSoft : engine.theme.panelDeep
-          border.color: snapButton.activeFocus || snapButton.checked ? engine.theme.accent : engine.theme.border
+        ToolButton {
+          id: deleteVideoButton
+          objectName: "deleteVideoButton"
+          width: 28; height: 27
+          enabled: tl.videoPresent
+          focusPolicy: Qt.StrongFocus
+          Accessible.name: tl.deleteVideoLabel
+          ToolTip.visible: hovered
+          ToolTip.text: tl.deleteVideoTip
+          contentItem: Item {
+            readonly property color iconColor: deleteVideoButton.enabled
+                ? (deleteVideoButton.hovered ? engine.theme.bad : engine.theme.textMuted)
+                : engine.theme.textDim
+            Rectangle { x: 8; y: 9; width: 12; height: 12; radius: 1; color: "transparent"; border.color: parent.iconColor }
+            Rectangle { x: 6; y: 6; width: 16; height: 2; radius: 1; color: parent.iconColor }
+            Rectangle { x: 10; y: 3; width: 8; height: 2; radius: 1; color: parent.iconColor }
+          }
+          background: Rectangle {
+            radius: 3
+            color: deleteVideoButton.hovered && deleteVideoButton.enabled ? "#3a2028" : engine.theme.panelDeep
+            border.color: deleteVideoButton.activeFocus ? engine.theme.bad : engine.theme.border
+          }
+          onClicked: tl.deleteVideoRequested()
         }
-        onToggled: tl.snappingEnabled = checked
+      }
+      Rectangle {
+        visible: tl.videoPresent
+        x: 0; y: tl.stripH; width: parent.width; height: tl.layerH; color: engine.theme.panelDeep
+        Label { anchors.centerIn: parent; text: "A1"; color: engine.theme.cyan; font.bold: true; font.pixelSize: 10 }
+        ToolButton {
+          anchors.right: parent.right; anchors.rightMargin: 3; anchors.verticalCenter: parent.verticalCenter
+          width: 25; height: 22; text: tl.primaryAudioEnabled ? "󰕾" : "󰖁"
+          onClicked: tl.primaryAudioToggled()
+        }
       }
       Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: engine.theme.border }
     }
     Item {
-      x: 0; y: tl.rulerH + tl.blockH + tl.stripH; width: parent.width
-      height: tl.layers.length * tl.layerH
+      x: 0; y: tl.rulerH + tl.blockH + tl.stripH + (tl.videoPresent ? tl.layerH : 0); width: parent.width
+      height: tl.trackCount() * tl.layerH
       Repeater {
         model: tl.layers.length
         delegate: Rectangle {
           required property int index
-          x: 0; y: index * tl.layerH
-          width: headers.width; height: tl.layerH
+          x: 0; y: tl.trackOffset(index) * tl.layerH
+          width: headers.width; height: tl.layerH * (tl.layers[index] && tl.layers[index].type === "video" ? 2 : 1)
           color: tl.dragHeaderOver === index && tl.dragHeaderFrom !== index ? engine.theme.accentSoft : engine.theme.panelAlt
           border.color: tl.dragHeaderOver === index && tl.dragHeaderFrom !== index ? engine.theme.accent : "transparent"
-          Label { anchors.centerIn: parent; text: "T" + (index + 1); color: tl.selectedLayer === index ? engine.theme.good : engine.theme.textDim; font.bold: true; font.pixelSize: 10 }
+          Label { anchors.centerIn: parent; text: tl.layerTrackLabel(index); color: tl.selectedLayer === index ? engine.theme.good : engine.theme.textDim; font.bold: true; font.pixelSize: 10 }
           Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: engine.theme.border }
           // drag vertically to reorder the layer track
           MouseArea {
@@ -159,6 +227,18 @@ Item {
               tl.dragHeaderFrom = -1; tl.dragHeaderOver = -1
             }
           }
+          Rectangle {
+            visible: tl.layers[index] && tl.layers[index].type === "video"
+            x: 0; y: tl.layerH; width: parent.width; height: tl.layerH
+            color: engine.theme.panelDeep
+            Label { anchors.centerIn: parent; text: "A" + (index + 1); color: engine.theme.cyan; font.bold: true; font.pixelSize: 10 }
+            ToolButton {
+              anchors.right: parent.right; anchors.rightMargin: 3; anchors.verticalCenter: parent.verticalCenter
+              width: 25; height: 22
+              text: tl.layers[index] && tl.layers[index].audioEnabled === false ? "×" : "♪"
+              onClicked: tl.audioToggled(index)
+            }
+          }
         }
       }
     }
@@ -170,21 +250,22 @@ Item {
     id: flick
     x: tl.headW + 1; y: 1; width: tl.width - tl.headW - 2; height: tl.height - 2
     contentWidth: tl.t2x(tl.duration) + 2
-    contentHeight: tl.rulerH + tl.blockH + tl.stripH + tl.layers.length * tl.layerH
+    contentHeight: tl.rulerH + tl.blockH + tl.stripH + (tl.videoPresent ? tl.layerH : 0) + tl.trackCount() * tl.layerH
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     flickableDirection: Flickable.HorizontalFlick
 
-    // Ctrl+wheel zoom
+    // Wheel over the timeline zooms; Shift+wheel scrolls horizontally.
     WheelHandler {
-      acceptedModifiers: Qt.ControlModifier
+      acceptedModifiers: Qt.NoModifier | Qt.ControlModifier
       onWheel: function (wheel) {
         var anchorT = (flick.contentX + wheel.x) / tl.pps()
         tl.zoomBy(wheel.angleDelta.y > 0 ? 1.25 : 0.8, anchorT)
       }
     }
-    // plain wheel = horizontal scroll
+    // Shift+wheel keeps horizontal navigation available.
     WheelHandler {
+      acceptedModifiers: Qt.ShiftModifier
       onWheel: function (wheel) {
         flick.contentX = Math.max(0, Math.min(flick.contentWidth - flick.width, flick.contentX - wheel.angleDelta.y))
       }
@@ -245,11 +326,11 @@ Item {
             x: tl.t2x(clipData.start); width: Math.max(14, tl.t2x(clipData.end - clipData.start)); height: tl.blockH
             Rectangle {
               anchors.fill: parent; anchors.margins: 1; radius: 4
-              color: bb.lc(); opacity: tl.selectedBlock === index ? 0.85 : 0.45
+              color: bb.lc(); opacity: bb.clipData.visible === false ? 0.16 : (tl.selectedBlock === index ? 0.85 : 0.45)
               border.color: tl.selectedBlock === index ? "#fff" : bb.lc(); border.width: tl.selectedBlock === index ? 2 : 1
               Label {
                 anchors.centerIn: parent
-                text: (index + 1) + " " + bb.clipData.layout
+                text: (bb.clipData.visible === false ? "◌ " : "") + (index + 1) + " " + bb.clipData.layout
                 color: "#16161e"; font.pixelSize: 9; font.bold: true
                 elide: Text.ElideRight; width: parent.width - 6; horizontalAlignment: Text.AlignHCenter
               }
@@ -299,7 +380,7 @@ Item {
 
       // filmstrip (V1)
       Item {
-        id: strip; x: 0; y: tl.rulerH + tl.blockH; width: tracks.width; height: tl.stripH
+        id: strip; x: 0; y: tl.rulerH + tl.blockH; width: tracks.width; height: tl.stripH + (tl.videoPresent ? tl.layerH : 0)
         Rectangle { anchors.fill: parent; color: engine.theme.panelDeep }
         Row {
           x: 2; y: 2; height: tl.stripH - 4; spacing: 1
@@ -332,6 +413,15 @@ Item {
               t = tl.snapTime(t, [0, len], "trim", -1, 0, tl.duration - len, mouse.modifiers)
               tl.trimEdited(t, t + len)
             } }
+          }
+          ToolButton {
+            anchors.right: parent.right; anchors.top: parent.top; anchors.topMargin: 2
+            width: 28; height: 22; z: 5
+            enabled: tl.videoPresent && tl.trimOut - tl.trimIn > 0.1
+            text: "✂"
+            ToolTip.visible: hovered
+            ToolTip.text: "Create clip from In/Out selection"
+            onClicked: tl.createPrimaryClip()
           }
         }
         Rectangle {  // in handle
@@ -381,6 +471,28 @@ Item {
           anchors.fill: parent; z: -1
           onPressed: tl.seek(tl.x2t(mouse.x))
           onPositionChanged: if (pressed) tl.seek(tl.x2t(mouse.x))
+          onClicked: tl.primaryClicked()
+        }
+        MouseArea {
+          x: 0; y: 0; width: parent.width; height: tl.stripH; z: 1
+          acceptedButtons: Qt.LeftButton
+          onPressed: function(mouse) {
+            var px = mouse.x
+            if (Math.abs(px - tl.t2x(tl.trimIn)) < 12 || Math.abs(px - tl.t2x(tl.trimOut)) < 12) {
+              mouse.accepted = false
+              return
+            }
+            tl.primaryClicked()
+            tl.seek(tl.x2t(px))
+          }
+        }
+        Rectangle {
+          visible: tl.videoPresent
+          x: 0; y: tl.stripH; width: parent.width; height: tl.layerH
+          color: tl.primaryAudioEnabled ? "#24495a" : engine.theme.panelDeep
+          border.color: tl.primaryAudioEnabled ? engine.theme.cyan : engine.theme.border
+          opacity: tl.primaryAudioEnabled ? 0.9 : 0.45
+          Label { anchors.left: parent.left; anchors.leftMargin: 7; anchors.verticalCenter: parent.verticalCenter; text: tl.primaryAudioEnabled ? "audio · 100%" : "muted"; color: engine.theme.text; font.pixelSize: 9 }
         }
       }
 
@@ -391,8 +503,8 @@ Item {
           id: track
           required property int index
           readonly property var clipData: { tl.layersRev; return Object.assign({}, tl.layers[index]) }
-          x: 0; y: tl.rulerH + tl.blockH + tl.stripH + index * tl.layerH
-          width: tracks.width; height: tl.layerH
+          x: 0; y: tl.rulerH + tl.blockH + tl.stripH + (tl.videoPresent ? tl.layerH : 0) + tl.trackOffset(index) * tl.layerH
+          width: tracks.width; height: tl.layerH * (track.clipData.type === "video" ? 2 : 1)
           Rectangle { anchors.fill: parent; color: index % 2 ? engine.theme.panelDeep : engine.theme.panelAlt; opacity: 0.6 }
           Rectangle {
             id: block
@@ -409,7 +521,7 @@ Item {
             Label {
               anchors.left: parent.left; anchors.leftMargin: 7; anchors.verticalCenter: parent.verticalCenter
               width: parent.width - 14
-              text: track.clipData.text || "—"
+              text: track.clipData.text || (track.clipData.path ? track.clipData.path.split("/").pop() : "—")
               elide: Text.ElideRight
               color: engine.theme.text; font.pixelSize: 10
             }
@@ -445,6 +557,30 @@ Item {
                   tl.layerEdited(index, track.clipData.inS, tl.snapTime(t, [0], "layer", index, track.clipData.inS + 0.2, tl.duration, mouse.modifiers))
                 } }
               }
+            }
+          }
+          Rectangle {
+            visible: track.clipData.type === "video"
+            x: tl.t2x(track.clipData.inS + (track.clipData.audioOffset || 0)) + 1
+            y: tl.layerH + 3
+            width: Math.max(16, tl.t2x(track.clipData.outS - track.clipData.inS) - 2)
+            height: 22; radius: 4
+            color: track.clipData.audioEnabled === false ? engine.theme.panelDeep : "#24495a"
+            border.color: track.clipData.audioEnabled === false ? engine.theme.border : engine.theme.cyan
+            opacity: track.clipData.audioEnabled === false ? 0.45 : 0.9
+            Label {
+              anchors.left: parent.left; anchors.leftMargin: 7; anchors.verticalCenter: parent.verticalCenter
+              text: track.clipData.audioEnabled === false ? "muted" : "audio · " + Math.round((track.clipData.audioVolume === undefined ? 1 : track.clipData.audioVolume) * 100) + "%"
+              color: engine.theme.text; font.pixelSize: 9
+            }
+            MouseArea {
+              anchors.fill: parent; preventStealing: true; cursorShape: Qt.DragMoveCursor
+              property real grabT: 0
+              onPressed: function(mouse) { grabT = tl.x2t(mapToItem(track, mouse.x, 0).x) - track.clipData.inS - (track.clipData.audioOffset || 0) }
+              onPositionChanged: function(mouse) { if (pressed) {
+                var offset = tl.x2t(mapToItem(track, mouse.x, 0).x) - track.clipData.inS - grabT
+                tl.audioMoved(index, Math.max(-track.clipData.inS, Math.min(tl.duration - track.clipData.outS, offset)))
+              } }
             }
           }
         }

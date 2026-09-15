@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 W, H, FPS, SECONDS = 960, 540, 30, 10
-OUT = Path(__file__).with_name("assets") / "omareel-motion-source.mp4"
+OUT = Path(__file__).with_name("assets") / "omashort-motion-source.mp4"
 OUT.parent.mkdir(parents=True, exist_ok=True)
 
 cmd = [

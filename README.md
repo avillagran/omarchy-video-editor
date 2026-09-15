@@ -1,15 +1,14 @@
-# Omareel
+# OmaShort
 
-![Omareel — native Qt6/QML video editor for Omarchy](preview.png)
+![OmaShort — native Qt6/QML video editor for Omarchy](preview.png)
 
-[Watch the rendered keyframes, easing and fades demo](examples/omareel-keyframes-fades-preview.mp4)
+[Watch the rendered keyframes, easing and fades demo](examples/omashort-keyframes-fades-preview.mp4)
 
 Local clip editor for Omarchy. **Native C++/Qt6/QML build — no server,
 no internet, no Electron.** Processing via the system ffmpeg/ffprobe.
 
-The HTML/Electron version (server/ + electron/ + CDP tests) was archived to
-`~/Desarrollo/Omareel-html-archive/` (2026-09-10); the only active product is
-`native/`.
+The retired HTML/Electron prototype (server/ + electron/ + CDP tests) is
+archived separately; the only active product is `native/`.
 
 ## Architecture
 
@@ -20,22 +19,23 @@ native/
   qml/                 QML UI: main.qml (dock), Timeline, Panel, OverlayLayers,
                        OutputPreview, RegionEditor, Theme.js (tokens), I18n.js
   qml.qrc              embedded release fallback for the complete QML UI
-  omareel-native.pro   qmake6
+  omashort-native.pro  qmake6
 ```
 
 - `QProcess` over the system ffmpeg/ffprobe (local performance, no wasm).
-- Data in `~/.local/share/omareel/`:
-  - `media/` sources, `media/clips/` cuts, `out/` renders (`*-v.mp4` vertical,
-    `*-h.mp4` horizontal), `out/thumbs/`
+- Data in `~/.local/share/omashort/` (the legacy directory is migrated automatically):
+  - `media/` sources, `media/clips/` cuts and `out/thumbs/` shared media caches
+  - `projects/<project-id>/out/` project-scoped renders (`*-v.mp4` vertical,
+    `*-h.mp4` horizontal); **Finished clips never leak between projects**
   - `project.json` AI-editable project with live reload
   - `native-qml/` optional mutable QML override; release binaries also embed the UI
 
 ## Build & run
 
 ```bash
-cd native && qmake6 omareel-native.pro && make -j4
-./omareel-native              # GUI (Wayland/Hyprland)
-QT_QPA_PLATFORM=offscreen ./omareel-native --selftest   # headless pipeline: render -> verify
+cd native && qmake6 omashort-native.pro && make -j4
+./omashort-native              # GUI (Wayland/Hyprland)
+QT_QPA_PLATFORM=offscreen ./omashort-native --selftest   # headless pipeline: render -> verify
 sudo make install             # installs the binary and bundled ASR helper
 
 # deterministic flags for screenshots/verification:
@@ -47,16 +47,14 @@ sudo make install             # installs the binary and bundled ASR helper
 --uitest-render     # dual v+h render through the RENDER panel path
 ```
 
-Deploy QML to the VM: `rsync -a --delete native/qml/ <vm>:~/.local/share/omareel/native-qml/`
+Deploy QML to the VM: `rsync -a --delete native/qml/ <vm>:~/.local/share/omashort/native-qml/`
 
 ### Android tablet build
 
-OMAREEL 0.0.2 has an Android arm64 build for tablets and phones. It uses the
-package id `cl.villagranquiroz.omareel`, opens in landscape, imports videos from
-Android's document picker, and uses Qt Multimedia for local preview playback.
-
-Download the versioned APK from the
-[v0.0.2 release](https://github.com/avillagran/omarchy-video-editor/releases/tag/v0.0.2).
+OmaShort uses the package id `cl.villagranquiroz.omashort`, opens in landscape,
+imports videos from Android's document picker, and uses Qt Multimedia for local
+preview playback. Releases published under the retired codename use a different
+package id and are retained only as historical previews.
 
 The current Android build does not bundle command-line ffmpeg/ffprobe, so local
 render export and offline ASR remain desktop-only until native Android media
@@ -69,10 +67,10 @@ never downloads a model or contacts a service. Point it at an existing
 faster-whisper environment and CTranslate2 model:
 
 ```bash
-export OMAREEL_ASR_PYTHON=/path/to/faster-whisper-venv/bin/python
-export OMAREEL_ASR_MODEL=/path/to/local-ctranslate2-model
+export OMASHORT_ASR_PYTHON=/path/to/faster-whisper-venv/bin/python
+export OMASHORT_ASR_MODEL=/path/to/local-ctranslate2-model
 # Optional when the script is not at ./scripts/transcribe_local.py:
-export OMAREEL_ASR_SCRIPT=/path/to/transcribe_local.py
+export OMASHORT_ASR_SCRIPT=/path/to/transcribe_local.py
 ```
 
 Normal mode burns the generated SRT in a fixed movie position. Reel mode turns
@@ -85,13 +83,13 @@ headlessly. PySide6 is a test-only dependency; the editor remains C++/Qt6.
 From the repository root:
 
 ```bash
-uv venv /tmp/omareel-qt-tests
-uv pip install --python /tmp/omareel-qt-tests/bin/python PySide6
+uv venv /tmp/omashort-qt-tests
+uv pip install --python /tmp/omashort-qt-tests/bin/python PySide6
 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-  /tmp/omareel-qt-tests/bin/python -m unittest discover -s native/tests -v
+  /tmp/omashort-qt-tests/bin/python -m unittest discover -s native/tests -v
 ```
 
-For isolated native pipeline checks, set `OMAREEL_DATA` to a temporary
+For isolated native pipeline checks, set `OMASHORT_DATA` to a temporary
 directory containing a `media/` folder with a real source video before
 running `--selftest`; this avoids touching your working project.
 
@@ -110,7 +108,7 @@ real source video of at least ten seconds. From the repository root:
 
 ```bash
 repo="$PWD"
-build="$(mktemp -d /tmp/omareel-live-build-XXXXXX)"
+build="$(mktemp -d /tmp/omashort-live-build-XXXXXX)"
 (cd "$build" && qmake6 "$repo/native/tests/live_reload.pro" && make -j4)
 python3 native/tests/live_reload_e2e.py \
   --binary "$build/live-reload-probe" --qml "$repo/native/qml/main.qml" \
@@ -184,7 +182,7 @@ project or restarts the installed editor.
 - Qt drops QFileSystemWatcher paths after rename-replace: re-add the path
   when processing fileChanged.
 - Infinite overlays hang ffmpeg 9: always `trim=duration=…` + setpts.
-- `rsync --delete` of the QML targets `~/.local/share/omareel/native-qml/`, not the
+- `rsync --delete` of the QML targets `~/.local/share/omashort/native-qml/`, not the
   source tree.
 
 ## Known issues
@@ -202,4 +200,4 @@ project or restarts the installed editor.
 - Exported keyframe motion and size tweening are checked from decoded pixels;
   fade-in/fade-out are checked at the beginning, middle and end of a real MP4.
 - The portable demo render is 1080×1920, H.264, 30 fps, 10.000 s and 300
-  decoded frames (`examples/omareel-keyframes-fades-preview.mp4`).
+  decoded frames (`examples/omashort-keyframes-fades-preview.mp4`).

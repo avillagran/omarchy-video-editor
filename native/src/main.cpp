@@ -1,4 +1,4 @@
-// main.cpp - Omareel Native entry point (Qt6 QML app, Wayland on Omarchy)
+// main.cpp - OmaShort Native entry point (Qt6 QML app, Wayland on Omarchy)
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -57,7 +57,7 @@ static int selftest(OmareelEngine &engine) {
     });
     QVariantMap mainRegion; mainRegion["x"] = 0; mainRegion["y"] = 0; mainRegion["w"] = 100; mainRegion["h"] = 100;
     QVariantMap regions; regions["main"] = mainRegion;
-    QVariantMap layer; layer["type"] = "text"; layer["text"] = "Omareel"; layer["x"] = 0.5; layer["y"] = 0.12;
+    QVariantMap layer; layer["type"] = "text"; layer["text"] = "OmaShort"; layer["x"] = 0.5; layer["y"] = 0.12;
     layer["size"] = 110; layer["color"] = "#ffffff"; layer["in"] = 0.0; layer["out"] = cutDur;
     QVariantList testLayers{layer};
     // Animated magenta marker: proves exported keyframe tween + alpha fades,
@@ -104,6 +104,12 @@ static int selftest(OmareelEngine &engine) {
     loop.exec();
   }
   if (outPath.isEmpty()) { STLOG("selftest: FAIL render: %s", errMsg.toLocal8Bit().constData()); return 5; }
+  bool outputListed = false;
+  for (const QVariant &item : engine.listOutputs())
+    outputListed = outputListed || item.toMap().value(QStringLiteral("path")).toString() == outPath;
+  if (!outputListed || !outPath.contains(QStringLiteral("/projects/"))) {
+    STLOG("selftest: FAIL project output scope"); return 25;
+  }
 
   const QVariantMap probe = engine.probeVideo(outPath);
   STLOG("selftest: out %dx%d dur %.1f", probe.value("width").toInt(), probe.value("height").toInt(), probe.value("duration").toDouble());
@@ -141,7 +147,7 @@ static int selftest(OmareelEngine &engine) {
 
   // Named project persistence: save atomically, switch active project, then load it.
   const QString project = engine.dataDir() + QStringLiteral("/selftest-project.json");
-  const QVariantMap projectDoc{{"version", 1}, {"app", "omareel"},
+  const QVariantMap projectDoc{{"version", 1}, {"app", "omashort"},
                                {"layers", QVariantList{QVariantMap{{"type", "text"}, {"text", "Saved project"}}}}};
   if (!engine.saveProjectAs(project, projectDoc)) { STLOG("selftest: FAIL project save"); return 7; }
   const QVariantMap loaded = engine.openProjectFile(project);
@@ -185,9 +191,53 @@ static int selftest(OmareelEngine &engine) {
     STLOG("selftest: FAIL portable Save As paths"); return 18;
   }
   const QString activeProject = engine.projectPath();
-  if (engine.saveProjectAs(QStringLiteral("/proc/omareel-write-must-fail.json"), portable)
+  if (engine.saveProjectAs(QStringLiteral("/proc/omashort-write-must-fail.json"), portable)
       || engine.projectPath() != activeProject) {
     STLOG("selftest: FAIL Save As write-error reporting"); return 19;
+  }
+  const QString freshProject = engine.newProject();
+  const QString secondFreshProject = engine.newProject();
+  const QString thirdFreshProject = engine.newProject();
+  if (freshProject.isEmpty() || freshProject == activeProject
+      || secondFreshProject.isEmpty() || secondFreshProject == freshProject
+      || thirdFreshProject.isEmpty() || thirdFreshProject == freshProject
+      || thirdFreshProject == secondFreshProject
+      || QFileInfo::exists(freshProject) || QFileInfo::exists(secondFreshProject)
+      || QFileInfo::exists(thirdFreshProject)) {
+    STLOG("selftest: FAIL new project target isolation"); return 20;
+  }
+  if (!engine.listOutputs().isEmpty()) {
+    STLOG("selftest: FAIL new project inherited outputs"); return 26;
+  }
+  const QString sourcePath = first.value(QStringLiteral("path")).toString();
+  if (!engine.removeSource(sourcePath) || !QFileInfo::exists(sourcePath)) {
+    STLOG("selftest: FAIL remove source kept file"); return 21;
+  }
+  for (const QVariant &item : engine.scanMedia()) {
+    if (item.toMap().value(QStringLiteral("path")).toString() == sourcePath) {
+      STLOG("selftest: FAIL removed source still listed"); return 22;
+    }
+  }
+  if (engine.importVideo(QUrl::fromLocalFile(sourcePath).toString()) != sourcePath) {
+    STLOG("selftest: FAIL reimport source"); return 23;
+  }
+  bool sourceRestored = false;
+  for (const QVariant &item : engine.scanMedia())
+    sourceRestored = sourceRestored
+        || item.toMap().value(QStringLiteral("path")).toString() == sourcePath;
+  if (!sourceRestored) { STLOG("selftest: FAIL reimport source listing"); return 24; }
+
+  const QString collisionA = engine.dataDir() + QStringLiteral("/collision-a/shared.mp4");
+  const QString collisionB = engine.dataDir() + QStringLiteral("/collision-b/shared.mp4");
+  QDir().mkpath(QFileInfo(collisionA).absolutePath());
+  QDir().mkpath(QFileInfo(collisionB).absolutePath());
+  QFile::copy(sourcePath, collisionA);
+  QFile::copy(sourcePath, collisionB);
+  const QString importedA = engine.importVideo(QUrl::fromLocalFile(collisionA).toString());
+  const QString importedB = engine.importVideo(QUrl::fromLocalFile(collisionB).toString());
+  if (importedA.isEmpty() || importedB.isEmpty() || importedA == importedB
+      || !QFileInfo::exists(importedA) || !QFileInfo::exists(importedB)) {
+    STLOG("selftest: FAIL same-basename imports"); return 27;
   }
 
   // Exercise the asynchronous ASR process contract without a model download.
@@ -198,9 +248,9 @@ static int selftest(OmareelEngine &engine) {
   if (!scriptFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) return 14;
   scriptFile.write("import pathlib,sys\npathlib.Path(sys.argv[3]).write_text('1\\n00:00:00,000 --> 00:00:01,000\\nOffline ASR\\n\\n')\n");
   scriptFile.close();
-  qputenv("OMAREEL_ASR_PYTHON", QStandardPaths::findExecutable(QStringLiteral("python3")).toLocal8Bit());
-  qputenv("OMAREEL_ASR_MODEL", fakeModel.toLocal8Bit());
-  qputenv("OMAREEL_ASR_SCRIPT", fakeScript.toLocal8Bit());
+  qputenv("OMASHORT_ASR_PYTHON", QStandardPaths::findExecutable(QStringLiteral("python3")).toLocal8Bit());
+  qputenv("OMASHORT_ASR_MODEL", fakeModel.toLocal8Bit());
+  qputenv("OMASHORT_ASR_SCRIPT", fakeScript.toLocal8Bit());
   QString srtPath;
   {
     QEventLoop loop;
@@ -221,8 +271,8 @@ static int selftest(OmareelEngine &engine) {
 }
 
 int main(int argc, char *argv[]) {
-  QGuiApplication::setApplicationName(QStringLiteral("omareel"));
-  QGuiApplication::setApplicationDisplayName(QStringLiteral("Omareel"));
+  QGuiApplication::setApplicationName(QStringLiteral("omashort"));
+  QGuiApplication::setApplicationDisplayName(QStringLiteral("OmaShort"));
   QGuiApplication app(argc, argv);
 
   OmareelEngine engine;

@@ -1,4 +1,4 @@
-// engine.cpp - Omareel Native backend implementation.
+// engine.cpp - OmaShort Native backend implementation.
 #include "engine.h"
 #include <QDir>
 #include <QFileInfo>
@@ -26,6 +26,9 @@
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
+#endif
+#ifdef Q_OS_UNIX
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -325,16 +328,19 @@ void EngineWorker::process() {
     }
 
     if (task.kind == QLatin1String("transcribe")) {
-      const QString python = qEnvironmentVariable("OMAREEL_ASR_PYTHON");
-      const QString model = qEnvironmentVariable("OMAREEL_ASR_MODEL");
-      QString script = qEnvironmentVariable("OMAREEL_ASR_SCRIPT");
+      const QString python = qEnvironmentVariable("OMASHORT_ASR_PYTHON",
+          qEnvironmentVariable("OMAREEL_ASR_PYTHON"));
+      const QString model = qEnvironmentVariable("OMASHORT_ASR_MODEL",
+          qEnvironmentVariable("OMAREEL_ASR_MODEL"));
+      QString script = qEnvironmentVariable("OMASHORT_ASR_SCRIPT",
+          qEnvironmentVariable("OMAREEL_ASR_SCRIPT"));
       if (script.isEmpty()) {
         const QString bundled = QCoreApplication::applicationDirPath() + QStringLiteral("/scripts/transcribe_local.py");
         script = QFileInfo::exists(bundled) ? bundled : m_dataDir + QStringLiteral("/transcribe_local.py");
       }
       const QString clip = task.params.value(QStringLiteral("path")).toString();
       if (python.isEmpty() || model.isEmpty() || !QFileInfo::exists(script) || !QFileInfo::exists(model)) {
-        emit taskError(QStringLiteral("subtitles"), QStringLiteral("Local ASR needs OMAREEL_ASR_PYTHON, OMAREEL_ASR_MODEL and transcribe_local.py."));
+        emit taskError(QStringLiteral("subtitles"), QStringLiteral("Local ASR needs OMASHORT_ASR_PYTHON, OMASHORT_ASR_MODEL and transcribe_local.py."));
         continue;
       }
       const QString dir = m_dataDir + QStringLiteral("/out/subtitles"); QDir().mkpath(dir);
@@ -470,8 +476,9 @@ void EngineWorker::process() {
       {
         const QJsonArray streams = probeJson(clip, QStringLiteral("stream=codec_type"))
             .value(QStringLiteral("streams")).toArray();
-        for (const QJsonValue &sv : streams)
-          if (sv.toObject().value(QStringLiteral("codec_type")).toString() == QLatin1String("audio")) hasAudio = true;
+        if (task.params.value(QStringLiteral("audioEnabled"), true).toBool())
+          for (const QJsonValue &sv : streams)
+            if (sv.toObject().value(QStringLiteral("codec_type")).toString() == QLatin1String("audio")) hasAudio = true;
       }
 
       // template / blocks (segments with per-block layout)
@@ -550,6 +557,7 @@ void EngineWorker::process() {
                    - sv.toMap().value(QStringLiteral("start")).toDouble();
       }
       int oi = 0;
+      QStringList layerAudio;
       for (const QVariant &lv : activeLayers) {
         const QVariantMap layer = lv.toMap();
         const QString ltype = layer.value(QStringLiteral("type"), QStringLiteral("text")).toString();
@@ -559,6 +567,22 @@ void EngineWorker::process() {
         double out = layer.value(QStringLiteral("outS"), layer.value(QStringLiteral("out"), baseDur)).toDouble();
         out = qBound(in + 0.1, out, baseDur);
         const double tdur = out - in;
+        const double sourceIn = qMax(0.0, layer.value(QStringLiteral("sourceIn"), 0.0).toDouble());
+        if (ltype == QLatin1String("video")
+            && layer.value(QStringLiteral("audioEnabled"), true).toBool()
+            && layer.value(QStringLiteral("path")).toString() != clip
+            && probeJson(layer.value(QStringLiteral("path")).toString(), QStringLiteral("stream=codec_type"))
+                   .value(QStringLiteral("streams")).toArray().contains(QJsonObject{{QStringLiteral("codec_type"), QStringLiteral("audio")}})) {
+          const double offset = layer.value(QStringLiteral("audioOffset"), 0.0).toDouble();
+          const double sourceStart = sourceIn + qMax(0.0, -offset);
+          const double delay = qMax(0.0, in + offset) * 1000.0;
+          const QString audioLabel = QStringLiteral("la%1").arg(oi);
+          fc << QStringLiteral("[%1:a]atrim=start=%2:duration=%3,asetpts=PTS-STARTPTS,adelay=%4:all=1,volume=%5[%6]")
+                    .arg(n).arg(num(sourceStart)).arg(num(tdur)).arg(num(delay))
+                    .arg(num(qBound(0.0, layer.value(QStringLiteral("audioVolume"), 1.0).toDouble(), 4.0)))
+                    .arg(audioLabel);
+          layerAudio << QStringLiteral("[%1]").arg(audioLabel);
+        }
         const QString gx = animatedLayerValue(layer, progSpace, QStringLiteral("px"), QStringLiteral("x"), 0.5);
         const QString gy = animatedLayerValue(layer, progSpace, QStringLiteral("py"), QStringLiteral("y"), 0.5);
         QString wExpr, hExpr;
@@ -573,13 +597,13 @@ void EngineWorker::process() {
           wExpr = QStringLiteral("max(2,%1*(%2))").arg(outW).arg(gw);
           hExpr = QStringLiteral("max(2,%1*(%2))").arg(outH).arg(gh);
         }
-        const QString chain = QStringLiteral("trim=duration=%1,setpts=PTS-STARTPTS+%2/TB,format=yuva420p,scale=w='%3':h='%4':eval=frame")
-                                  .arg(num(tdur), num(in), wExpr, hExpr);
+        const QString chain = QStringLiteral("trim=start=%1:duration=%2,setpts=PTS-STARTPTS+%3/TB,format=yuva420p,scale=w='%4':h='%5':eval=frame")
+                                  .arg(num(sourceIn), num(tdur), num(in), wExpr, hExpr);
         const int maskIdx = layer.value(QStringLiteral("_maskIdx"), -1).toInt();
         if (maskIdx > 0) {
           fc << QStringLiteral("[%1:v]%2,format=rgba[ovg%3]").arg(n).arg(chain).arg(oi);
-          fc << QStringLiteral("[%1:v]trim=duration=%2,setpts=PTS-STARTPTS+%3/TB,scale=w='%4':h='%5':eval=frame[ovm%6]")
-                    .arg(maskIdx).arg(num(tdur), num(in), wExpr, hExpr).arg(oi);
+          fc << QStringLiteral("[%1:v]trim=start=%2:duration=%3,setpts=PTS-STARTPTS+%4/TB,scale=w='%5':h='%6':eval=frame[ovm%7]")
+                    .arg(maskIdx).arg(num(sourceIn)).arg(num(tdur), num(in), wExpr, hExpr).arg(oi);
           fc << QStringLiteral("[ovg%1][ovm%1]alphamerge[ovraw%1]").arg(oi);
         } else {
           fc << QStringLiteral("[%1:v]%2[ovraw%3]").arg(n).arg(chain).arg(oi);
@@ -608,12 +632,29 @@ void EngineWorker::process() {
         oi++;
       }
 
+      QString audioMap;
+      if (!layerAudio.isEmpty()) {
+        if (!segs.isEmpty() && hasAudio) layerAudio.prepend(QStringLiteral("[a_base]"));
+        else if (segs.isEmpty() && hasAudio) layerAudio.prepend(QStringLiteral("[0:a]"));
+        audioMap = QStringLiteral("[audio_mix]");
+        fc << layerAudio.join(QString()) + QStringLiteral("amix=inputs=%1:duration=longest:normalize=0[audio_mix]").arg(layerAudio.size());
+      }
       args << QStringLiteral("-filter_complex") << fc.join(QLatin1Char(';'));
       args << QStringLiteral("-map") << QStringLiteral("[%1]").arg(vPrev);
-      if (!segs.isEmpty()) { if (hasAudio) args << QStringLiteral("-map") << QStringLiteral("[a_base]"); }
+      if (!audioMap.isEmpty()) args << QStringLiteral("-map") << audioMap;
+      else if (!segs.isEmpty()) { if (hasAudio) args << QStringLiteral("-map") << QStringLiteral("[a_base]"); }
       else args << QStringLiteral("-map") << QStringLiteral("0:a?");
 
-      const QString outPath = m_dataDir + QStringLiteral("/out/") + jobId + suffix + QStringLiteral(".mp4");
+      QString outPath = task.params.value(QStringLiteral("outputPath")).toString();
+      if (outPath.isEmpty()) {
+        const QString outputDir = task.params.value(QStringLiteral("outputDir"),
+            m_dataDir + QStringLiteral("/out")).toString();
+        QDir().mkpath(outputDir);
+        outPath = outputDir + QLatin1Char('/') + jobId + suffix + QStringLiteral(".mp4");
+      } else {
+        QDir().mkpath(QFileInfo(outPath).absolutePath());
+        if (QFileInfo(outPath).suffix().isEmpty()) outPath += QStringLiteral(".mp4");
+      }
       args << QStringLiteral("-progress") << QStringLiteral("pipe:1");
       // codec/quality: h264 (default) | h265 | vp9, crf + preset from the render panel
       const QString codec = task.params.value(QStringLiteral("codec"), QStringLiteral("h264")).toString();
@@ -668,14 +709,41 @@ void EngineWorker::process() {
 
 /* ----------------------------- engine ----------------------------- */
 
+static bool ensureLegacyDataAlias(const QString &currentData, const QString &legacyData) {
+  const QString currentCanonical = QFileInfo(currentData).canonicalFilePath();
+  if (currentCanonical.isEmpty()) return false;
+  QFileInfo legacyInfo(legacyData);
+  if (legacyInfo.exists()) return legacyInfo.canonicalFilePath() == currentCanonical;
+  if (legacyInfo.isSymLink()) QFile::remove(legacyData); // repair a dangling alias
+  if (!QFile::link(currentData, legacyData)) return false;
+  return QFileInfo(legacyData).canonicalFilePath() == currentCanonical;
+}
+
 OmareelEngine::OmareelEngine(QObject *parent) : QObject(parent) {
-  m_dataDir = qEnvironmentVariableIsSet("OMAREEL_DATA")
-      ? QString::fromLocal8Bit(qgetenv("OMAREEL_DATA"))
-      : QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  const QString configuredData = qEnvironmentVariable("OMASHORT_DATA",
+      qEnvironmentVariable("OMAREEL_DATA"));
+  const QString dataRoot = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+  const QString currentData = dataRoot + QStringLiteral("/omashort");
+  const QString legacyData = dataRoot + QStringLiteral("/omareel");
+  if (!configuredData.isEmpty()) {
+    m_dataDir = configuredData;
+  } else if (!QFileInfo::exists(currentData) && QFileInfo::exists(legacyData)) {
+    if (QDir().rename(legacyData, currentData)) {
+      m_dataDir = currentData;
+    } else {
+      m_dataDir = legacyData;
+    }
+  } else {
+    m_dataDir = currentData;
+  }
   for (const QString &sub : {QStringLiteral("media"), QStringLiteral("media/clips"), QStringLiteral("out"), QStringLiteral("out/thumbs")})
     QDir().mkpath(m_dataDir + QLatin1Char('/') + sub);
+  if (m_dataDir == currentData && !ensureLegacyDataAlias(currentData, legacyData))
+    qWarning("Could not establish the legacy OmaShort data-path alias");
   m_projectFile = m_dataDir + QStringLiteral("/project.json");
-  const QString themeOverride = qEnvironmentVariable("OMAREEL_THEME_FILE");
+  migrateLegacyOutputs();
+  const QString themeOverride = qEnvironmentVariable("OMASHORT_THEME_FILE",
+      qEnvironmentVariable("OMAREEL_THEME_FILE"));
   m_themePaths = themeOverride.isEmpty()
       ? QStringList{QDir::homePath() + QStringLiteral("/.local/state/omarchy/current/theme/colors.toml"),
                     QDir::homePath() + QStringLiteral("/.config/omarchy/current/theme/colors.toml")}
@@ -819,13 +887,38 @@ void OmareelEngine::enqueue(const EngineTask &t) {
   m_worker->mutex.unlock();
 }
 
+static QStringList removedSources(const QString &dataDir) {
+  QFile file(dataDir + QStringLiteral("/removed-sources.json"));
+  if (!file.open(QIODevice::ReadOnly)) return {};
+  const QJsonArray values = QJsonDocument::fromJson(file.readAll()).array();
+  QStringList paths;
+  for (const QJsonValue &value : values) paths << value.toString();
+  return paths;
+}
+
+static bool setSourceRemoved(const QString &dataDir, const QString &path, bool removed) {
+  QStringList paths = removedSources(dataDir);
+  const QString normalized = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+  if (removed) {
+    if (!paths.contains(normalized)) paths << normalized;
+  } else {
+    paths.removeAll(normalized);
+  }
+  paths.sort();
+  QSaveFile file(dataDir + QStringLiteral("/removed-sources.json"));
+  const QByteArray bytes = QJsonDocument(QJsonArray::fromStringList(paths)).toJson(QJsonDocument::Compact);
+  return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.commit();
+}
+
 QVariantList OmareelEngine::scanMedia() {
   QVariantList out;
   const QDir dir(m_dataDir + QStringLiteral("/media"));
+  const QStringList removed = removedSources(m_dataDir);
   const QStringList exts = {QStringLiteral("*.mp4"), QStringLiteral("*.mkv"), QStringLiteral("*.mov"), QStringLiteral("*.webm")};
   const QFileInfoList files = dir.entryInfoList(exts, QDir::Files, QDir::Time);
   for (const QFileInfo &fi : files) {
     if (fi.fileName().startsWith(QLatin1String("upload-"))) continue;
+    if (removed.contains(QDir::cleanPath(fi.absoluteFilePath()))) continue;
     QVariantMap m;
     m[QStringLiteral("id")] = fi.completeBaseName();
     m[QStringLiteral("path")] = fi.absoluteFilePath();
@@ -842,8 +935,18 @@ QVariantMap OmareelEngine::probeVideo(const QString &path) {
   const auto it = m_probeCache.constFind(path);
   if (it != m_probeCache.constEnd()) return it.value();
   QVariantMap m;
-  const QJsonObject st = probeJson(path, QStringLiteral("stream=width,height:format=duration"));
-  const QJsonObject vs = st.value(QStringLiteral("streams")).toArray().first().toObject();
+  const QJsonObject st = probeJson(path, QStringLiteral("stream=codec_type,width,height:format=duration"));
+  const QJsonArray streams = st.value(QStringLiteral("streams")).toArray();
+  QJsonObject vs;
+  for (const QJsonValue &value : streams) {
+    const QJsonObject candidate = value.toObject();
+    if (candidate.value(QStringLiteral("codec_type")).toString() != QLatin1String("video")) continue;
+    if (candidate.value(QStringLiteral("width")).toInt() > 0
+        && candidate.value(QStringLiteral("height")).toInt() > 0) {
+      vs = candidate;
+      break;
+    }
+  }
   m[QStringLiteral("width")] = vs.value(QStringLiteral("width")).toInt();
   m[QStringLiteral("height")] = vs.value(QStringLiteral("height")).toInt();
   m[QStringLiteral("duration")] = probeDuration(path);
@@ -879,6 +982,17 @@ void OmareelEngine::requestStrip(const QString &videoPath, int frames) {
   t.params[QStringLiteral("path")] = videoPath;
   t.params[QStringLiteral("frames")] = frames;
   enqueue(t);
+}
+
+static bool sameLocalFile(const QString &a, const QString &b) {
+  if (QFileInfo(a).absoluteFilePath() == QFileInfo(b).absoluteFilePath()) return true;
+#ifdef Q_OS_UNIX
+  struct stat left, right;
+  if (::stat(QFile::encodeName(a).constData(), &left) == 0
+      && ::stat(QFile::encodeName(b).constData(), &right) == 0)
+    return left.st_dev == right.st_dev && left.st_ino == right.st_ino;
+#endif
+  return false;
 }
 
 QString OmareelEngine::importVideo(const QString &fileUrl) {
@@ -941,16 +1055,29 @@ QString OmareelEngine::importVideo(const QString &fileUrl) {
       if (count == 0) break;
       if (output.write(chunk.constData(), count) != count) return {};
     }
-    return output.commit() ? dst : QString();
+    if (!output.commit() || !setSourceRemoved(m_dataDir, dst, false)) return {};
+    return dst;
   }
 #endif
   const QString src = sourceUrl.toLocalFile();
   if (src.isEmpty()) return {};
-  const QString dst = m_dataDir + QStringLiteral("/media/") + QFileInfo(src).fileName();
-  if (QFileInfo::exists(dst)) return dst;
-  if (QFile::link(src, dst)) return dst;      // hardlink: instant, same filesystem
-  if (QFile::copy(src, dst)) return dst;      // fallback
+  const QFileInfo sourceInfo(src);
+  QString dst = m_dataDir + QStringLiteral("/media/") + sourceInfo.fileName();
+  if (QFileInfo::exists(dst) && sameLocalFile(src, dst))
+    return setSourceRemoved(m_dataDir, dst, false) ? dst : QString();
+  int suffix = 2;
+  while (QFileInfo::exists(dst))
+    dst = m_dataDir + QStringLiteral("/media/") + sourceInfo.completeBaseName()
+        + QStringLiteral("-import-%1.").arg(suffix++) + sourceInfo.suffix();
+  if ((QFile::link(src, dst) || QFile::copy(src, dst)) && setSourceRemoved(m_dataDir, dst, false)) return dst;
   return {};
+}
+
+bool OmareelEngine::removeSource(const QString &path) {
+  const QString mediaDir = QDir::cleanPath(m_dataDir + QStringLiteral("/media"));
+  const QString normalized = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+  if (QFileInfo(normalized).absolutePath() != mediaDir || !QFileInfo::exists(normalized)) return false;
+  return setSourceRemoved(m_dataDir, normalized, true);
 }
 
 void OmareelEngine::deleteMedia(const QString &path) {
@@ -959,7 +1086,7 @@ void OmareelEngine::deleteMedia(const QString &path) {
 
 QVariantList OmareelEngine::listOutputs() {
   QVariantList out;
-  const QDir dir(m_dataDir + QStringLiteral("/out"));
+  const QDir dir(projectOutputDir());
   const QFileInfoList files = dir.entryInfoList({QStringLiteral("*.mp4")}, QDir::Files, QDir::Time);
   for (const QFileInfo &fi : files) {
     QVariantMap m;
@@ -988,10 +1115,38 @@ void OmareelEngine::cut(const QString &sessionPath, double start, double end) {
 void OmareelEngine::renderVertical(const QVariantMap &params) {
   EngineTask t; t.kind = QStringLiteral("render");
   t.params = params;
+  t.params[QStringLiteral("outputDir")] = projectOutputDir();
   t.params[QStringLiteral("jobId")] = QUuid::createUuid().toString(QUuid::WithoutBraces).left(32);
   // hand the generated id back via progress 0 signal so QML can track it
   enqueue(t);
   emit renderProgress(t.params[QStringLiteral("jobId")].toString(), 0.0);
+}
+
+QString OmareelEngine::projectOutputDir() const {
+  const QByteArray projectKey = QCryptographicHash::hash(
+      QFileInfo(m_projectFile).absoluteFilePath().toUtf8(), QCryptographicHash::Sha256)
+      .toHex().left(24);
+  return m_dataDir + QStringLiteral("/projects/") + QString::fromLatin1(projectKey)
+      + QStringLiteral("/out");
+}
+
+void OmareelEngine::migrateLegacyOutputs() {
+  const QDir legacyDir(m_dataDir + QStringLiteral("/out"));
+  const QFileInfoList files = legacyDir.entryInfoList(
+      {QStringLiteral("*.mp4")}, QDir::Files, QDir::Time);
+  if (files.isEmpty()) return;
+  const QString targetDir = projectOutputDir();
+  if (!QDir().mkpath(targetDir)) return;
+  for (const QFileInfo &source : files) {
+    QString target = targetDir + QLatin1Char('/') + source.fileName();
+    int suffix = 2;
+    while (QFileInfo::exists(target))
+      target = targetDir + QLatin1Char('/') + source.completeBaseName()
+          + QStringLiteral("-legacy-%1.").arg(suffix++) + source.suffix();
+    if (QFile::rename(source.absoluteFilePath(), target)) continue;
+    if (QFile::copy(source.absoluteFilePath(), target))
+      QFile::remove(source.absoluteFilePath());
+  }
 }
 
 void OmareelEngine::transcribeAudio(const QString &clipPath, const QString &language) {
@@ -1025,7 +1180,7 @@ QVariantList OmareelEngine::subtitleLayers(const QString &srtPath, bool reelStyl
 
 QString OmareelEngine::rasterizeText(const QVariantMap &layer) {
   const QString tmp = QDir::temp().absoluteFilePath(
-      QStringLiteral("omareel-prev-%1.png").arg(QUuid::createUuid().toString(QUuid::WithoutBraces).left(8)));
+      QStringLiteral("omashort-prev-%1.png").arg(QUuid::createUuid().toString(QUuid::WithoutBraces).left(8)));
   QImage img(270, 480, QImage::Format_ARGB32);   // small preview
   img.fill(Qt::transparent);
   QPainter pt(&img);
@@ -1112,6 +1267,18 @@ bool OmareelEngine::saveProject(const QVariantMap &doc) {
   m_lastProjHash = hash;
   watchProjectFile();
   return true;
+}
+
+QString OmareelEngine::newProject() {
+  QString candidate = m_dataDir + QStringLiteral("/untitled.project.json");
+  int suffix = 2;
+  while (candidate == m_projectFile || QFileInfo::exists(candidate)
+         || m_reservedProjectFiles.contains(candidate))
+    candidate = m_dataDir + QStringLiteral("/untitled-%1.project.json").arg(suffix++);
+  if (!setProjectFile(candidate)) return {};
+  m_reservedProjectFiles.insert(candidate);
+  m_lastProjHash.clear();
+  return m_projectFile;
 }
 
 QVariantMap OmareelEngine::openProjectFile(const QString &fileUrl) {

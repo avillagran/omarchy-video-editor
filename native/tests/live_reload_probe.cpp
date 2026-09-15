@@ -46,9 +46,9 @@ static void writeJson(const QString &path, const QJsonObject &value) {
   if (file.open(QIODevice::WriteOnly)) { file.write(QJsonDocument(value).toJson()); file.commit(); }
 }
 int main(int argc, char **argv) {
-  QGuiApplication::setApplicationName("omareel-live-reload-test");
+  QGuiApplication::setApplicationName("omashort-live-reload-test");
   QGuiApplication app(argc, argv);
-  if (argc != 2 || qEnvironmentVariableIsEmpty("OMAREEL_DATA")) return 2;
+  if (argc != 2 || qEnvironmentVariableIsEmpty("OMASHORT_DATA")) return 2;
   OmareelEngine engine;
   QQmlApplicationEngine qml;
   qml.rootContext()->setContextProperty("engine", &engine);

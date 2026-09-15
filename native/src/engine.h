@@ -1,4 +1,4 @@
-// engine.h - Omareel Native backend: local video library, cut, vertical render
+// engine.h - OmaShort Native backend: local video library, cut, vertical render
 // with text/subtitle overlays. ffmpeg/ffprobe via QProcess on a worker thread.
 #ifndef OMAREEL_ENGINE_H
 #define OMAREEL_ENGINE_H
@@ -15,6 +15,7 @@
 #include <QFileSystemWatcher>
 #include <QTimer>
 #include <QHash>
+#include <QSet>
 
 struct EngineTask {
   QString kind;              // "thumb" | "cut" | "render"
@@ -70,6 +71,7 @@ public:
   Q_INVOKABLE void requestStrip(const QString &videoPath, int frames = 16);   // filmstrip for the timeline
   Q_INVOKABLE QStringList cachedStrip(const QString &videoPath);
   Q_INVOKABLE QString importVideo(const QString &fileUrl);   // copy/link into media/
+  Q_INVOKABLE bool removeSource(const QString &path);        // hide from Sources; keep the file
   Q_INVOKABLE void deleteMedia(const QString &path);
   Q_INVOKABLE QVariantList listOutputs();
   Q_INVOKABLE void openFolder(const QString &path);
@@ -90,6 +92,7 @@ public:
   Q_INVOKABLE QString projectPath() const { return m_projectFile; }
   Q_INVOKABLE QVariantMap loadProject();                 // read project.json ({} if none)
   Q_INVOKABLE bool saveProject(const QVariantMap &doc);  // atomic write + remember hash
+  Q_INVOKABLE QString newProject();
   Q_INVOKABLE QVariantMap openProjectFile(const QString &fileUrl);
   Q_INVOKABLE bool saveProjectAs(const QString &fileUrl, const QVariantMap &doc);
 
@@ -120,7 +123,10 @@ private:
   QString m_projectFile;
   QVariantMap m_theme;
   QHash<QString, QVariantMap> m_probeCache;
+  QSet<QString> m_reservedProjectFiles;
   QByteArray m_lastProjHash;
+  QString projectOutputDir() const;
+  void migrateLegacyOutputs();
   void watchProjectFile();
   bool setProjectFile(const QString &fileUrl);
   void loadTheme();
