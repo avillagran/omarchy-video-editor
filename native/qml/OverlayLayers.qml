@@ -20,6 +20,8 @@ Item {
   property var layers: []
   property int rev: 0           // in-place edit revision (see header)
   property real position: 0      // seconds
+  property real sourceTrimIn: 0  // source second corresponding to cut-timeline zero
+  property real cutPosition: position - sourceTrimIn // output seconds; host maps skipped blocks
   property bool playing: true    // mirrors the main player; layers pause with the timeline
   property string space: "out"   // "out" = 1080x1920 fractions | "prog" = source frame fractions
   property real refH: 1920       // pixel height the fraction space refers to (font scaling)
@@ -27,7 +29,12 @@ Item {
   signal layerMoved(int index, var patch)
   signal layerPressed(int index)
 
-  function inRange(l) { return position >= (l.inS !== undefined ? l.inS : 0) && position <= (l.outS !== undefined ? l.outS : 1e9) }
+  function layerTime(l) { return l.timingSpace === "cut" ? cutPosition : position }
+  function inRange(l) {
+    var time = layerTime(l)
+    return time >= (l.inS !== undefined ? l.inS : 0) && time <= (l.outS !== undefined ? l.outS : 1e9)
+  }
+  function layerSourcePosition(l) { return Math.max(0, (l.sourceIn || 0) + layerTime(l) - (l.inS || 0)) }
 
   // dual-space accessors: program coords default to the output coords (and vice versa)
   function gx(l) { return ov.space === "prog" ? (l.px !== undefined ? l.px : (l.x !== undefined ? l.x : 0.5)) : (l.x !== undefined ? l.x : 0.5) }
@@ -39,7 +46,7 @@ Item {
   function frameColor(l, fallback) { return l.color ? l.color : fallback }
   function syncLayerPlayer(pl, l) {
     if (pl.duration <= 0) return
-    var target = Math.max(0, (l.sourceIn || 0) + ov.position - (l.inS || 0))
+    var target = layerSourcePosition(l)
     if (Math.abs(pl.position / 1000 - target) > 0.3)
       pl.position = Math.round(target * 1000)
     // A stopped pipeline paints no frame after a seek. Preroll once; the next
@@ -78,11 +85,11 @@ Item {
     delegate: Item {
       id: ld
       required property int index
-      // Evaluate the project keyframes against the shared timeline position.
+      // Evaluate keyframes in the layer's declared timeline space.
       // A fresh snapshot keeps live C++/QML edits from retaining stale values.
-      readonly property var modelData: { ov.rev; return Keyframes.at(ov.layers[index], ov.position) }
+      readonly property var modelData: { ov.rev; return Keyframes.at(ov.layers[index], ov.layerTime(ov.layers[index])) }
       visible: { ov.rev; return ov.inRange(modelData) }
-      opacity: { ov.rev; return Keyframes.opacityAt(ov.layers[index], ov.position) }
+      opacity: { ov.rev; return Keyframes.opacityAt(ov.layers[index], ov.layerTime(ov.layers[index])) }
       z: index
 
       // text layer

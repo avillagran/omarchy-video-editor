@@ -4,6 +4,17 @@
 
 [Watch the rendered keyframes, easing and fades demo](examples/omashort-keyframes-fades-preview.mp4)
 
+## OmaShort × fframes teaser
+
+[![Watch the OmaShort × fframes teaser (12 seconds)](promo/omashort-teaser-poster.jpg)](promo/omashort-fframes-final-v2.mp4)
+
+[Watch or download the 1080p video](promo/omashort-fframes-final-v2.mp4) · [Editing project and source parts](promo/README.md)
+
+The teaser's five parts were assembled and exported by OmaShort. Its timeline
+footage is a real, isolated editor capture. The fframes integration is an
+**external MCP bridge** for importing/replacing rendered MP4 clips—not direct
+editing of fframes vectors or Rust scenes inside OmaShort.
+
 Local clip editor for Omarchy. **Native C++/Qt6/QML build — no server,
 no internet, no Electron.** Processing via the system ffmpeg/ffprobe.
 
@@ -92,6 +103,67 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 For isolated native pipeline checks, set `OMASHORT_DATA` to a temporary
 directory containing a `media/` folder with a real source video before
 running `--selftest`; this avoids touching your working project.
+
+### External MCP project bridge (desktop)
+
+An external MCP-capable agent can read and make typed, compare-and-swap edits to
+an explicitly selected existing OmaShort JSON project. This is a local stdio
+server, **not in-app chat**; it does not launch the editor or execute fframes
+code. From the repository root, install the optional Python MCP SDK 1.x in a
+separate environment (replace the example environment path as desired):
+
+```bash
+uv venv /absolute/path/to/omashort-mcp-venv
+uv pip install --python /absolute/path/to/omashort-mcp-venv/bin/python 'mcp>=1,<2'
+/absolute/path/to/omashort-mcp-venv/bin/python -m unittest native.tests.test_omashort_bridge -v
+```
+
+Add this **example configuration** to an MCP client's server configuration;
+substitute absolute paths to your checkout and environment:
+
+```json
+{
+  "mcpServers": {
+    "omashort": {
+      "command": "/absolute/path/to/omashort-mcp-venv/bin/python",
+      "args": ["/absolute/path/to/Omareel/native/scripts/omashort_mcp.py"]
+    }
+  }
+}
+```
+
+Call `get_project` with the absolute path to an **existing** project JSON,
+then pass its returned `sha256` to `patch_project` or
+`import_fframes_render`. A stale hash is rejected: read again, review the
+new state, then retry. See [the project format](docs/project-format.md) for
+operation fields and time semantics. The editor watches its currently selected
+project and reloads external atomic edits. On Unix, the updated editor and bridge
+share an advisory sidecar lock, and autosave checks the project revision before
+writing; stale UI saves are refused rather than overwriting an MCP edit.
+Other external writers (or an older running editor binary) may not honor this
+lock: pause those writers during the transaction and confirm the final state.
+
+Render an fframes clip **separately** with fframes installed/checked out:
+
+```bash
+cargo run --release -- render -o /absolute/path/to/clip.mp4 --json
+```
+
+After the render completes, call `import_fframes_render` with the MP4 absolute
+path and desired `in_seconds`/`out_seconds`, optionally `as_main: true`.
+After changing the fframes Rust source, render to a **new MP4 path** and call
+`replace_fframes_render(path, expected_sha256, layer_index, mp4_path)` using
+the latest project hash. This swaps only that video layer's media reference;
+its timing, position, size, keyframes and other edits remain intact. The
+replacement must have the same aspect ratio when it can be probed. This is
+an explicit action, not automatic file watching of the fframes project.
+The bridge only references the existing file: it does not copy, transcode,
+validate playback, or add it to the editor's output gallery. Keep that media
+file available at its original path. The imported clip is editable as a
+positioned/timed *video layer* in OmaShort, but the original fframes Rust/SVG
+scene, its vectors, and its timeline are **not** editable as native OmaShort
+objects. Make source-scene changes in fframes, render again, then replace
+the layer's media reference.
 
 ### Native live-editing integration test
 

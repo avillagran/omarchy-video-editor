@@ -8,11 +8,21 @@
 
 int main(int argc, char **argv) {
   QGuiApplication app(argc, argv);
-  if (argc < 2 || argc > 3 || (argc == 3 && QString::fromLocal8Bit(argv[2]) != QLatin1String("--horizontal"))) {
-    std::fprintf(stderr, "usage: render-project-probe PROJECT.json [--horizontal]\n");
+  bool horizontal = false;
+  bool highQuality = false;
+  if (argc < 2 || argc > 4) {
+    std::fprintf(stderr, "usage: render-project-probe PROJECT.json [--horizontal] [--high-quality]\n");
     return 2;
   }
-  const bool horizontal = argc == 3;
+  for (int i = 2; i < argc; ++i) {
+    const QString arg = QString::fromLocal8Bit(argv[i]);
+    if (arg == QLatin1String("--horizontal")) horizontal = true;
+    else if (arg == QLatin1String("--high-quality")) highQuality = true;
+    else {
+      std::fprintf(stderr, "unknown option: %s\n", argv[i]);
+      return 2;
+    }
+  }
   OmareelEngine engine;
   const QVariantMap doc = engine.openProjectFile(QString::fromLocal8Bit(argv[1]));
   const QString video = doc.value("video").toString();
@@ -24,6 +34,7 @@ int main(int argc, char **argv) {
   QVariantList segments;
   for (const QVariant &value : doc.value("blocks").toList()) {
     const QVariantMap block = value.toMap();
+    if (!block.value("visible", true).toBool()) continue;
     const QString layout = block.value("layout", "completa").toString();
     QVariantMap regions = block.value("regions").toMap();
     if (layout == QLatin1String("apilar")) regions["split"] = block.value("split", 0.5);
@@ -67,7 +78,8 @@ int main(int argc, char **argv) {
                          {"height", horizontal ? 1080 : 1920},
                          {"space", horizontal ? "prog" : "out"},
                          {"suffix", horizontal ? "-horizontal-probe" : "-preview"},
-                         {"codec", "h264"}, {"crf", 18}, {"preset", "veryfast"}});
+                         {"codec", "h264"}, {"crf", highQuality ? 12 : 18},
+                         {"preset", highQuality ? "slow" : "veryfast"}});
   loop.exec();
   if (output.isEmpty()) {
     std::fprintf(stderr, "render failed: %s\n", error.toLocal8Bit().constData());

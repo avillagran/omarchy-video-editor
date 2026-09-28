@@ -357,12 +357,44 @@ ApplicationWindow {
       })
     }
     var lay = win.layoutName()
-    var endS = win.cutPath !== "" ? win.durS() : (win.current ? win.current.duration : 0)
-    return [{ start: 0, end: endS, layout: lay,
+    var startS = win.cutPath !== "" ? 0 : win.trimIn
+    var endS = win.cutPath !== "" ? win.durS()
+                                   : Math.min(win.trimOut, win.current ? win.current.duration : 0)
+    return [{ start: startS, end: endS, layout: lay,
               regions: lay === "apilar" ? { top: win.apilarTop, bottom: win.apilarBottom, split: win.split }
                     : (lay === "pip" || lay === "circulo")
                       ? { main: { x: win.regionX, y: win.regionY, w: win.regionW, h: win.regionH }, fg: win.fgRegion, fx: win.pipFx, fy: win.pipFy }
                       : { main: { x: win.regionX, y: win.regionY, w: win.regionW, h: win.regionH } } }]
+  }
+  // Match export's ordered concat of visible source intervals (not source - trimIn).
+  function sourceToCutTime(sourceTime) {
+    blocksRev
+    if (!blocks.length) return sourceTime - trimIn
+    var elapsed = 0
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i]
+      if (b.visible === false) continue
+      if (sourceTime >= b.start && sourceTime <= b.end)
+        return elapsed + sourceTime - b.start
+      elapsed += b.end - b.start
+    }
+    return -1 // No output frame corresponds to a hidden/skipped source interval.
+  }
+  function layerTimeAt(layer, sourceTime) {
+    return layer.timingSpace === "cut" ? sourceToCutTime(sourceTime) : sourceTime
+  }
+  function cutDuration() {
+    if (win.blocks.length) {
+      var total = 0
+      for (var i = 0; i < win.blocks.length; i++) {
+        var b = win.blocks[i]
+        if (b.visible !== false) total += Math.max(0, b.end - b.start)
+      }
+      return Math.max(0.1, total)
+    }
+    var end = Math.min(win.trimOut, win.durS() || win.trimOut)
+    if (!isFinite(end) || end > 86400) end = win.trimIn + 10
+    return Math.max(0.1, end - win.trimIn)
   }
   // space "out": layers use x,y,w,h (vertical canvas); space "prog": px,py,pw,ph (source frame)
   property var pendingRenderFormats: []
@@ -489,7 +521,7 @@ ApplicationWindow {
                         duration: probe.duration || 0, width: probe.width || 0, height: probe.height || 0 }
       }
       win.cutPath = ""
-      loadVideo(d.video)
+      loadVideo(d.video, false)
     }
   }
   Timer {
@@ -632,14 +664,14 @@ ApplicationWindow {
     return Math.round(b/1e3) + " KB"
   }
   function durS() { return playerRef && playerRef.duration > 0 ? playerRef.duration / 1000 : 0 }
-  function loadVideo(path) {
+  function loadVideo(path, resetTrim) {
     if (!playerRef) return
     playerRef.stop()
     win.videoPath = path
     playerRef.source = "file://" + path
     var pr = engine.probeVideo(path)
     if (pr.width) { win.srcW = pr.width; win.srcH = pr.height }
-    trimIn = 0
+    if (resetTrim !== false) trimIn = 0
     if (stripFor !== path) { stripUrls = []; stripFor = path; engine.requestStrip(path) }
     playTimer.restart()
   }
@@ -683,7 +715,7 @@ ApplicationWindow {
 
   property var playerRef: null
   property string videoPath: ""
-  onPlayerRefChanged: if (playerRef && win.current && !playerRef.source.toString()) loadVideo(win.current.path)
+  onPlayerRefChanged: if (playerRef && win.current && !playerRef.source.toString()) loadVideo(win.current.path, false)
 
   function patchLayer(i, patch) {
     var l = win.layers
@@ -697,7 +729,9 @@ ApplicationWindow {
       // Auto-keyframe edits at the current playhead once animation exists. Start
       // from the interpolated state so dragging a second pose cannot snap back
       // to the first keyframe before the explicit diamond button is pressed.
-      var time = Math.round((win.playerRef ? win.playerRef.position / 1000 : 0) * 1000) / 1000
+      var sourceTime = win.playerRef ? win.playerRef.position / 1000 : 0
+      var time = Math.round(win.layerTimeAt(layer, sourceTime) * 1000) / 1000
+      if (time < 0 && layer.timingSpace === "cut") return
       layer.keyframes = Keyframes.patchedFrames(layer, patch, time, win.keyframeEasing)
     } else {
       for (var name2 in patch) {
@@ -712,6 +746,8 @@ ApplicationWindow {
   function keyframeAt(i, time) {
     var layer = win.layers[i]
     if (!layer) return
+    time = win.layerTimeAt(layer, time)
+    if (time < 0 && layer.timingSpace === "cut") return
     // Store only animatable/persisted values. This JSON stays simple for manual
     // or LLM editing and is evaluated identically by both previews.
     var frame = { time: Math.round(time * 1000) / 1000, easing: win.keyframeEasing }
@@ -731,6 +767,7 @@ ApplicationWindow {
   }
   function hasKeyframeAt(i, time) {
     var l = win.layers[i], frames = l && Array.isArray(l.keyframes) ? l.keyframes : []
+    if (l) time = win.layerTimeAt(l, time)
     for (var j = 0; j < frames.length; j++) if (Math.abs(frames[j].time - time) < 0.001) return true
     return false
   }
@@ -771,8 +808,9 @@ ApplicationWindow {
   }
   function addLayer(type, path) {
     var l = win.layers.slice()
+    var timelineOut = win.cutDuration()
     if (type === "text")
-      l.push({ type: "text", text: "", x: 0.5, y: 0.15, size: 90, opacity: 1, fadeIn: 0, fadeOut: 0, color: "#ffffff", font: "", inS: win.trimIn, outS: win.trimOut })
+      l.push({ type: "text", text: "", x: 0.5, y: 0.15, size: 90, opacity: 1, fadeIn: 0, fadeOut: 0, color: "#ffffff", font: "", inS: 0, outS: timelineOut, timingSpace: "cut" })
     else if (type === "video") {
       var probe = engine.probeVideo(path)
       var mediaAspect = probe.width > 0 && probe.height > 0 ? probe.width / probe.height : 16 / 9
@@ -783,9 +821,9 @@ ApplicationWindow {
                px: 0.5, py: 0.5, pw: programSize.w, ph: programSize.h,
                sourceAspect: mediaAspect,
                size: 90, opacity: 1, fadeIn: 0, fadeOut: 0, color: "#ffffff", font: "",
-               inS: win.trimIn, outS: win.trimOut })
+               inS: 0, outS: timelineOut, timingSpace: "cut" })
     } else
-      l.push({ type: type, path: path || "", text: "", x: 0.5, y: 0.5, w: 0.35, h: 0.20, size: 90, opacity: 1, fadeIn: 0, fadeOut: 0, color: "#ffffff", font: "", inS: win.trimIn, outS: win.trimOut })
+      l.push({ type: type, path: path || "", text: "", x: 0.5, y: 0.5, w: 0.35, h: 0.20, size: 90, opacity: 1, fadeIn: 0, fadeOut: 0, color: "#ffffff", font: "", inS: 0, outS: timelineOut, timingSpace: "cut" })
     win.layers = l
     win.selectedLayer = l.length - 1
     win.touchLayers()
@@ -1036,6 +1074,8 @@ ApplicationWindow {
         rev: win.layersRev
         refH: win.srcH
         position: playerRef ? playerRef.position / 1000 : 0
+        sourceTrimIn: win.trimIn
+        cutPosition: win.sourceToCutTime(position)
         playing: player.playbackState === MediaPlayer.PlayingState
         onLayerMoved: function (i, patch) { win.patchLayer(i, patch) }
         onLayerPressed: function (i) { win.selectedLayer = i }
@@ -1150,7 +1190,7 @@ ApplicationWindow {
         property var cardLayer: modelData
         readonly property var animatedLayer: {
           win.layersRev
-          return Keyframes.at(cardLayer, win.playerRef ? win.playerRef.position / 1000 : 0)
+          return Keyframes.at(cardLayer, win.layerTimeAt(cardLayer, win.playerRef ? win.playerRef.position / 1000 : 0))
         }
         property int idx: index
         width: ListView.view.width; height: cardCol.implicitHeight + 12; radius: engine.theme.radius
@@ -1407,6 +1447,8 @@ ApplicationWindow {
       active: outputContent.visible
       videoPath: win.videoPath
       position: win.playerRef ? win.playerRef.position / 1000 : 0
+      sourceTrimIn: win.trimIn
+      cutPosition: win.sourceToCutTime(position)
       playing: win.playerRef ? win.playerRef.playbackState === MediaPlayer.PlayingState : false
       layout: win.activeLayout()
       mainRegion: win.activeBoxA()

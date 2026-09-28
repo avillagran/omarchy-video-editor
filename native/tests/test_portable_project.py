@@ -16,7 +16,14 @@ class PortableProjectMedia(unittest.TestCase):
         self.assertIsNotNone(body)
         text = body.group(1)
         self.assertIn("engine.probeVideo(d.video)", text)
-        self.assertIn("loadVideo(d.video)", text)
+        self.assertIn("loadVideo(d.video, false)", text)
+
+    def test_external_main_video_import_keeps_project_trim(self):
+        # Applying an external project swaps the source without treating it as a
+        # manual new-source selection. Deferred player creation must do the same.
+        self.assertIn("loadVideo(d.video, false)", SOURCE)
+        self.assertIn("loadVideo(win.current.path, false)", SOURCE)
+        self.assertIn("if (resetTrim !== false) trimIn = 0", SOURCE)
 
     def test_autosave_preserves_relative_media_paths(self):
         self.assertIn('doc[QStringLiteral("_pathHints")] = hints', ENGINE)
@@ -31,7 +38,8 @@ class PortableProjectMedia(unittest.TestCase):
 
     def test_save_as_returns_the_atomic_write_result(self):
         self.assertIn("bool OmareelEngine::saveProject", ENGINE)
-        self.assertIn("if (!writeProjectFile(target, relativizeProjectPaths(doc, target), &hash)) return false", ENGINE)
+        self.assertIn("const QByteArray *expectedHash = target == m_projectFile ? &m_lastProjHash : nullptr", ENGINE)
+        self.assertIn("if (!writeProjectFile(target, relativizeProjectPaths(doc, target), &hash, expectedHash)) return false", ENGINE)
         self.assertIn("if (str !== win.lastSavedStr && engine.saveProject(doc))", SOURCE)
         self.assertNotIn("return QFileInfo::exists(projectPath()) && QFileInfo(projectPath()).size() > 0", ENGINE)
 

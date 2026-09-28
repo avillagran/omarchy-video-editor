@@ -28,6 +28,7 @@
 #include <QtCore/qcoreapplication_platform.h>
 #endif
 #ifdef Q_OS_UNIX
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -777,9 +778,13 @@ OmareelEngine::OmareelEngine(QObject *parent) : QObject(parent) {
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) return;
     const QByteArray bytes = f.readAll();
-    if (QCryptographicHash::hash(bytes, QCryptographicHash::Sha1) == m_lastProjHash) return;  // self-write
+    const QByteArray currentHash = QCryptographicHash::hash(bytes, QCryptographicHash::Sha1);
+    if (currentHash == m_lastProjHash) return;  // self-write
     const QJsonDocument d = QJsonDocument::fromJson(bytes);
-    if (d.isObject()) emit projectChangedExternally(resolveProjectPaths(d.object().toVariantMap(), path));
+    if (d.isObject()) {
+      m_lastProjHash = currentHash;
+      emit projectChangedExternally(resolveProjectPaths(d.object().toVariantMap(), path));
+    }
   });
 }
 
@@ -1252,9 +1257,27 @@ QVariantMap OmareelEngine::loadProject() {
   return d.isObject() ? resolveProjectPaths(d.object().toVariantMap(), projectPath()) : QVariantMap{};
 }
 
-static bool writeProjectFile(const QString &path, const QVariantMap &doc, QByteArray *hash) {
+static bool writeProjectFile(const QString &path, const QVariantMap &doc, QByteArray *hash,
+                             const QByteArray *expectedHash = nullptr) {
   const QByteArray bytes = QJsonDocument::fromVariant(doc).toJson(QJsonDocument::Indented);
   if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
+#ifdef Q_OS_UNIX
+  // The MCP bridge takes the same advisory lock around its final CAS check
+  // and rename. Never block the UI; the autosave timer retries on contention.
+  QFile lock(path + QStringLiteral(".bridge.lock"));
+  if (!lock.open(QIODevice::ReadWrite | QIODevice::Append)
+      || ::flock(lock.handle(), LOCK_EX | LOCK_NB) != 0) return false;
+#endif
+  if (expectedHash) {
+    QFile previous(path);
+    if (previous.exists()) {
+      if (!previous.open(QIODevice::ReadOnly)
+          || QCryptographicHash::hash(previous.readAll(), QCryptographicHash::Sha1) != *expectedHash)
+        return false;
+    } else if (!expectedHash->isEmpty()) {
+      return false;
+    }
+  }
   QSaveFile f(path);
   if (!f.open(QIODevice::WriteOnly) || f.write(bytes) != bytes.size() || !f.commit()) return false;
   if (hash) *hash = QCryptographicHash::hash(bytes, QCryptographicHash::Sha1);
@@ -1263,7 +1286,7 @@ static bool writeProjectFile(const QString &path, const QVariantMap &doc, QByteA
 
 bool OmareelEngine::saveProject(const QVariantMap &doc) {
   QByteArray hash;
-  if (!writeProjectFile(projectPath(), doc, &hash)) return false;
+  if (!writeProjectFile(projectPath(), doc, &hash, &m_lastProjHash)) return false;
   m_lastProjHash = hash;
   watchProjectFile();
   return true;
@@ -1299,7 +1322,8 @@ bool OmareelEngine::saveProjectAs(const QString &fileUrl, const QVariantMap &doc
   if (file.isEmpty()) return false;
   const QString target = QFileInfo(file).absoluteFilePath();
   QByteArray hash;
-  if (!writeProjectFile(target, relativizeProjectPaths(doc, target), &hash)) return false;
+  const QByteArray *expectedHash = target == m_projectFile ? &m_lastProjHash : nullptr;
+  if (!writeProjectFile(target, relativizeProjectPaths(doc, target), &hash, expectedHash)) return false;
   m_lastProjHash = hash;
   return setProjectFile(target);
 }

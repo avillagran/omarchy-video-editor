@@ -11,6 +11,8 @@ Item {
   property bool active: true
   property string videoPath: ""
   property real position: 0            // seconds (sync target)
+  property real sourceTrimIn: 0        // source second at cut-timeline zero
+  property real cutPosition: position - sourceTrimIn // output time with skipped blocks removed
   property bool playing: true          // mirrors the main player
   property string layout: "completa"   // completa | apilar | pip | circulo
   property var mainRegion: ({ x: 0, y: 0, w: 100, h: 100 })
@@ -167,7 +169,7 @@ Item {
           transformOrigin: Item.TopLeft
           z: 10
           OverlayLayers {
-            anchors.fill: parent; layers: op.layers; position: op.position; playing: op.playing
+            anchors.fill: parent; layers: op.layers; position: op.position; sourceTrimIn: op.sourceTrimIn; cutPosition: op.cutPosition; playing: op.playing
             active: op.active
             space: "out"; refH: 1920; rev: op.layersRev
             onLayerMoved: function (i, patch) { op.layerMoved(i, patch) }

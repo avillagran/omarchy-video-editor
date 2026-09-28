@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "app": "omashort",
+  "video": "assets/black-with-sound.mp4",
+  "trim": {
+    "in": 0,
+    "out": 12
+  },
+  "audioEnabled": true,
+  "template": "completa",
+  "region": {
+    "x": 0,
+    "y": 0,
+    "w": 100,
+    "h": 100
+  },
+  "layers": [
+    {
+      "type": "video",
+      "path": "assets/01-hook.mp4",
+      "name": "01-hook",
+      "x": 0.5,
+      "y": 0.5,
+      "w": 1,
+      "h": 1,
+      "px": 0.5,
+      "py": 0.5,
+      "pw": 1,
+      "ph": 1,
+      "sourceAspect": 1.7777777777777777,
+      "inS": 0.0,
+      "outS": 2.0,
+      "timingSpace": "cut",
+      "audioEnabled": false,
+      "opacity": 1
+    },
+    {
+      "type": "video",
+      "path": "assets/02-editor.mp4",
+      "name": "02-editor",
+      "x": 0.5,
+      "y": 0.5,
+      "w": 1,
+      "h": 1,
+      "px": 0.5,
+      "py": 0.5,
+      "pw": 1,
+      "ph": 1,
+      "sourceAspect": 1.7777777777777777,
+      "inS": 2.0,
+      "outS": 5.7,
+      "timingSpace": "cut",
+      "audioEnabled": false,
+      "opacity": 1
+    },
+    {
+      "type": "video",
+      "path": "assets/03-bridge.mp4",
+      "name": "03-bridge",
+      "x": 0.5,
+      "y": 0.5,
+      "w": 1,
+      "h": 1,
+      "px": 0.5,
+      "py": 0.5,
+      "pw": 1,
+      "ph": 1,
+      "sourceAspect": 1.7777777777777777,
+      "inS": 5.7,
+      "outS": 8.0,
+      "timingSpace": "cut",
+      "audioEnabled": false,
+      "opacity": 1
+    },
+    {
+      "type": "video",
+      "path": "assets/04-replace.mp4",
+      "name": "04-replace",
+      "x": 0.5,
+      "y": 0.5,
+      "w": 1,
+      "h": 1,
+      "px": 0.5,
+      "py": 0.5,
+      "pw": 1,
+      "ph": 1,
+      "sourceAspect": 1.7777777777777777,
+      "inS": 8.0,
+      "outS": 10.0,
+      "timingSpace": "cut",
+      "audioEnabled": false,
+      "opacity": 1
+    },
+    {
+      "type": "video",
+      "path": "assets/05-end.mp4",
+      "name": "05-end",
+      "x": 0.5,
+      "y": 0.5,
+      "w": 1,
+      "h": 1,
+      "px": 0.5,
+      "py": 0.5,
+      "pw": 1,
+      "ph": 1,
+      "sourceAspect": 1.7777777777777777,
+      "inS": 10.0,
+      "outS": 12.0,
+      "timingSpace": "cut",
+      "audioEnabled": false,
+      "opacity": 1
+    }
+  ],
+  "blocks": [
+    {
+      "start": 0,
+      "end": 12,
+      "layout": "completa",
+      "regions": {
+        "main": {
+          "x": 0,
+          "y": 0,
+          "w": 100,
+          "h": 100
+        }
+      }
+    }
+  ],
+  "render": {
+    "formats": [
+      "h"
+    ],
+    "codec": "h264",
+    "quality": "high"
+  }
+}
